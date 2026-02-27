@@ -20,6 +20,14 @@ bundled/libs/*.dist-info/**
 noxfile.py
 .pytest_cache/**
 .pylintrc
+.mypy_cache/**
+.ruff_cache/**
+.pre-commit-config.yaml
+TESTING.md
+pyproject.toml
+runtime.txt
+uv.lock
+**/*.map
 **/requirements.txt
 **/requirements.in
 **/tool/_debug_server.py
