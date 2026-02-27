@@ -1,0 +1,37 @@
+[project]
+name = "litestar-vscode"
+version = "0.1.0"
+description = "Litestar framework support for VS Code"
+requires-python = ">=3.9"
+
+[tool.ruff.lint.per-file-ignores]
+# Imports after sys.path manipulation are intentional
+"bundled/tool/*.py" = ["E402"]
+"src/test/python_tests/*.py" = ["E402"]
+# Bare except is intentional in lsp_jsonrpc (pylint: disable=bare-except)
+"bundled/tool/lsp_jsonrpc.py" = ["E722"]
+
+[tool.mypy]
+python_version = "3.9"
+ignore_missing_imports = true
+no_implicit_optional = false
+warn_unused_ignores = true
+exclude = [
+    "src/test/python_tests/test_data/",
+    "src/test/python_tests/lsp_test_client/",
+]
+# Bundled tool uses runtime sys.path and dynamic imports; type-check strictly later
+[[tool.mypy.overrides]]
+module = [
+    "dependency_resolver",
+    "diagnostics",
+    "route_parser",
+    "workspace_index",
+    "lsp_jsonrpc",
+    "lsp_utils",
+    "lsp_server",
+    "lsp_runner",
+    "_debug_server",
+]
+ignore_missing_imports = true
+follow_imports = "skip"

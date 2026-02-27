@@ -35,7 +35,13 @@ def _check_files(names: List[str]) -> None:
 
 
 def _update_pip_packages(session: nox.Session) -> None:
-    session.run("pip-compile", "--generate-hashes", "--resolver=backtracking", "--upgrade", "./requirements.in")
+    session.run(
+        "pip-compile",
+        "--generate-hashes",
+        "--resolver=backtracking",
+        "--upgrade",
+        "./requirements.in",
+    )
     session.run(
         "pip-compile",
         "--generate-hashes",
@@ -114,28 +120,27 @@ def lint(session: nox.Session) -> None:
     session.install("-r", "./requirements.txt")
     session.install("-r", "src/test/python_tests/requirements.txt")
 
-    session.install("pylint")
-    session.run("pylint", "-d", "W0511", "./bundled/tool")
+    session.install("ruff")
     session.run(
-        "pylint",
-        "-d",
-        "W0511",
-        "--ignore=./src/test/python_tests/test_data",
+        "ruff",
+        "check",
+        "--fix",
+        "--exclude=src/test/python_tests/test_data",
+        "./bundled/tool",
         "./src/test/python_tests",
+        "noxfile.py",
     )
-    session.run("pylint", "-d", "W0511", "noxfile.py")
+    session.run(
+        "ruff",
+        "format",
+        "--check",
+        "./bundled/tool",
+        "./src/test/python_tests",
+        "noxfile.py",
+    )
 
-    # check formatting using black
-    session.install("black")
-    session.run("black", "--check", "./bundled/tool")
-    session.run("black", "--check", "./src/test/python_tests")
-    session.run("black", "--check", "noxfile.py")
-
-    # check import sorting using isort
-    session.install("isort")
-    session.run("isort", "--check", "./bundled/tool")
-    session.run("isort", "--check", "./src/test/python_tests")
-    session.run("isort", "--check", "noxfile.py")
+    session.install("mypy", "nox")
+    session.run("mypy", "noxfile.py")
 
     # check typescript code
     session.run("npm", "run", "lint", external=True)

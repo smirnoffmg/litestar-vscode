@@ -1,17 +1,12 @@
-# Copyright (c) Microsoft Corporation. All rights reserved.
-# Licensed under the MIT License.
-"""Implementation of tool support over LSP."""
+"""Litestar language server — route discovery, diagnostics, CodeLens, and more."""
+
 from __future__ import annotations
 
-import copy
 import json
 import os
 import pathlib
-import re
 import sys
-import sysconfig
-import traceback
-from typing import Any, Optional, Sequence
+from typing import Any, Optional
 
 
 # **********************************************************
@@ -32,13 +27,18 @@ update_sys_path(
     os.getenv("LS_IMPORT_STRATEGY", "useBundled"),
 )
 
+import dependency_resolver as dep_resolver
+import diagnostics as litestar_diagnostics
+
 # **********************************************************
-# Imports needed for the language server goes below this.
+# Imports needed for the language server.
 # **********************************************************
 # pylint: disable=wrong-import-position,import-error
 import lsp_jsonrpc as jsonrpc
 import lsp_utils as utils
 import lsprotocol.types as lsp
+import route_parser
+import workspace_index as ws_index
 from pygls import server, uris, workspace
 
 WORKSPACE_SETTINGS = {}
@@ -46,217 +46,317 @@ GLOBAL_SETTINGS = {}
 RUNNER = pathlib.Path(__file__).parent / "lsp_runner.py"
 
 MAX_WORKERS = 5
-# TODO: Update the language server name and version.
 LSP_SERVER = server.LanguageServer(
-    name="<pytool-display-name>", version="<server version>", max_workers=MAX_WORKERS
+    name="Litestar", version="0.1.0", max_workers=MAX_WORKERS
 )
 
+TOOL_MODULE = "litestar"
+TOOL_DISPLAY = "Litestar"
+
+INDEX = ws_index.WorkspaceIndex()
+
 
 # **********************************************************
-# Tool specific code goes below this.
+# LSP event handlers.
 # **********************************************************
-
-# Reference:
-#  LS Protocol:
-#  https://microsoft.github.io/language-server-protocol/specifications/specification-3-16/
-#
-#  Sample implementations:
-#  Pylint: https://github.com/microsoft/vscode-pylint/blob/main/bundled/tool
-#  Black: https://github.com/microsoft/vscode-black-formatter/blob/main/bundled/tool
-#  isort: https://github.com/microsoft/vscode-isort/blob/main/bundled/tool
-
-# TODO: Update TOOL_MODULE with the module name for your tool.
-# e.g, TOOL_MODULE = "pylint"
-TOOL_MODULE = "<pytool-module>"
-
-# TODO: Update TOOL_DISPLAY with a display name for your tool.
-# e.g, TOOL_DISPLAY = "Pylint"
-TOOL_DISPLAY = "<pytool-display-name>"
-
-# TODO: Update TOOL_ARGS with default argument you have to pass to your tool in
-# all scenarios.
-TOOL_ARGS = []  # default arguments always passed to your tool.
-
-
-# TODO: If your tool is a linter then update this section.
-# Delete "Linting features" section if your tool is NOT a linter.
-# **********************************************************
-# Linting features start here
-# **********************************************************
-
-#  See `pylint` implementation for a full featured linter extension:
-#  Pylint: https://github.com/microsoft/vscode-pylint/blob/main/bundled/tool
 
 
 @LSP_SERVER.feature(lsp.TEXT_DOCUMENT_DID_OPEN)
 def did_open(params: lsp.DidOpenTextDocumentParams) -> None:
     """LSP handler for textDocument/didOpen request."""
     document = LSP_SERVER.workspace.get_document(params.text_document.uri)
-    diagnostics: list[lsp.Diagnostic] = _linting_helper(document)
-    LSP_SERVER.publish_diagnostics(document.uri, diagnostics)
+    _reparse_and_diagnose(document)
 
 
 @LSP_SERVER.feature(lsp.TEXT_DOCUMENT_DID_SAVE)
 def did_save(params: lsp.DidSaveTextDocumentParams) -> None:
     """LSP handler for textDocument/didSave request."""
     document = LSP_SERVER.workspace.get_document(params.text_document.uri)
-    diagnostics: list[lsp.Diagnostic] = _linting_helper(document)
-    LSP_SERVER.publish_diagnostics(document.uri, diagnostics)
+    _reparse_and_diagnose(document)
 
 
 @LSP_SERVER.feature(lsp.TEXT_DOCUMENT_DID_CLOSE)
 def did_close(params: lsp.DidCloseTextDocumentParams) -> None:
     """LSP handler for textDocument/didClose request."""
     document = LSP_SERVER.workspace.get_document(params.text_document.uri)
-    # Publishing empty diagnostics to clear the entries for this file.
     LSP_SERVER.publish_diagnostics(document.uri, [])
 
 
-def _linting_helper(document: workspace.Document) -> list[lsp.Diagnostic]:
-    # TODO: Determine if your tool supports passing file content via stdin.
-    # If you want to support linting on change then your tool will need to
-    # support linting over stdin to be effective. Read, and update
-    # _run_tool_on_document and _run_tool functions as needed for your project.
-    result = _run_tool_on_document(document)
-    return _parse_output_using_regex(result.stdout) if result.stdout else []
+def _reparse_and_diagnose(document: workspace.Document) -> None:
+    """Re-parse a document, update the workspace index, and publish diagnostics."""
+    if str(document.uri).startswith("vscode-notebook-cell"):
+        return
+    if utils.is_stdlib_file(document.path):
+        return
 
+    settings = _get_settings_by_document(document)
+    diag_enabled = settings.get("diagnosticsEnabled", True)
 
-# TODO: If your linter outputs in a known format like JSON, then parse
-# accordingly. But incase you need to parse the output using RegEx here
-# is a helper you can work with.
-# flake8 example:
-# If you use following format argument with flake8 you can use the regex below to parse it.
-# TOOL_ARGS += ["--format='%(row)d,%(col)d,%(code).1s,%(code)s:%(text)s'"]
-# DIAGNOSTIC_RE =
-#    r"(?P<line>\d+),(?P<column>-?\d+),(?P<type>\w+),(?P<code>\w+\d+):(?P<message>[^\r\n]*)"
-DIAGNOSTIC_RE = re.compile(r"")
+    result = INDEX.update_file(document.uri, document.source)
 
+    diags: list[lsp.Diagnostic] = []
+    if diag_enabled:
+        diags = litestar_diagnostics.compute_diagnostics(result, workspace_index=INDEX)
 
-def _parse_output_using_regex(content: str) -> list[lsp.Diagnostic]:
-    lines: list[str] = content.splitlines()
-    diagnostics: list[lsp.Diagnostic] = []
-
-    # TODO: Determine if your linter reports line numbers starting at 1 (True) or 0 (False).
-    line_at_1 = True
-    # TODO: Determine if your linter reports column numbers starting at 1 (True) or 0 (False).
-    column_at_1 = True
-
-    line_offset = 1 if line_at_1 else 0
-    col_offset = 1 if column_at_1 else 0
-    for line in lines:
-        if line.startswith("'") and line.endswith("'"):
-            line = line[1:-1]
-        match = DIAGNOSTIC_RE.match(line)
-        if match:
-            data = match.groupdict()
-            position = lsp.Position(
-                line=max([int(data["line"]) - line_offset, 0]),
-                character=int(data["column"]) - col_offset,
-            )
-            diagnostic = lsp.Diagnostic(
-                range=lsp.Range(
-                    start=position,
-                    end=position,
-                ),
-                message=data.get("message"),
-                severity=_get_severity(data["code"], data["type"]),
-                code=data["code"],
-                source=TOOL_MODULE,
-            )
-            diagnostics.append(diagnostic)
-
-    return diagnostics
-
-
-# TODO: if you want to handle setting specific severity for your linter
-# in a user configurable way, then look at look at how it is implemented
-# for `pylint` extension from our team.
-# Pylint: https://github.com/microsoft/vscode-pylint
-# Follow the flow of severity from the settings in package.json to the server.
-def _get_severity(*_codes: list[str]) -> lsp.DiagnosticSeverity:
-    # TODO: All reported issues from linter are treated as warning.
-    # change it as appropriate for your linter.
-    return lsp.DiagnosticSeverity.Warning
+    LSP_SERVER.publish_diagnostics(document.uri, diags)
 
 
 # **********************************************************
-# Linting features end here
+# CodeLens
 # **********************************************************
 
-# TODO: If your tool is a formatter then update this section.
-# Delete "Formatting features" section if your tool is NOT a
-# formatter.
-# **********************************************************
-# Formatting features start here
-# **********************************************************
-#  Sample implementations:
-#  Black: https://github.com/microsoft/vscode-black-formatter/blob/main/bundled/tool
 
-
-@LSP_SERVER.feature(lsp.TEXT_DOCUMENT_FORMATTING)
-def formatting(params: lsp.DocumentFormattingParams) -> list[lsp.TextEdit] | None:
-    """LSP handler for textDocument/formatting request."""
-    # If your tool is a formatter you can use this handler to provide
-    # formatting support on save. You have to return an array of lsp.TextEdit
-    # objects, to provide your formatted results.
-
+@LSP_SERVER.feature(lsp.TEXT_DOCUMENT_CODE_LENS)
+def code_lens(params: lsp.CodeLensParams) -> list[lsp.CodeLens] | None:
+    """LSP handler for textDocument/codeLens request."""
     document = LSP_SERVER.workspace.get_document(params.text_document.uri)
-    edits = _formatting_helper(document)
-    if edits:
-        return edits
-
-    # NOTE: If you provide [] array, VS Code will clear the file of all contents.
-    # To indicate no changes to file return None.
-    return None
-
-
-def _formatting_helper(document: workspace.Document) -> list[lsp.TextEdit] | None:
-    # TODO: For formatting on save support the formatter you use must support
-    # formatting via stdin.
-    # Read, and update_run_tool_on_document and _run_tool functions as needed
-    # for your formatter.
-    result = _run_tool_on_document(document, use_stdin=True)
-    if result.stdout:
-        new_source = _match_line_endings(document, result.stdout)
-        return [
-            lsp.TextEdit(
-                range=lsp.Range(
-                    start=lsp.Position(line=0, character=0),
-                    end=lsp.Position(line=len(document.lines), character=0),
-                ),
-                new_text=new_source,
-            )
-        ]
-    return None
-
-
-def _get_line_endings(lines: list[str]) -> str:
-    """Returns line endings used in the text."""
-    try:
-        if lines[0][-2:] == "\r\n":
-            return "\r\n"
-        return "\n"
-    except Exception:  # pylint: disable=broad-except
+    settings = _get_settings_by_document(document)
+    if not settings.get("codeLensEnabled", True):
         return None
 
+    return _build_code_lens(document)
 
-def _match_line_endings(document: workspace.Document, text: str) -> str:
-    """Ensures that the edited text line endings matches the document line endings."""
-    expected = _get_line_endings(document.source.splitlines(keepends=True))
-    actual = _get_line_endings(text.splitlines(keepends=True))
-    if actual == expected or actual is None or expected is None:
-        return text
-    return text.replace(actual, expected)
+
+def _build_code_lens(document: workspace.Document) -> list[lsp.CodeLens]:
+    """Build CodeLens items for test client calls in the document."""
+    import ast
+
+    lenses: list[lsp.CodeLens] = []
+    try:
+        tree = ast.parse(document.source)
+    except SyntaxError:
+        return lenses
+
+    test_client_vars: set[str] = set()
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            if isinstance(node.value, ast.Call):
+                func_name = route_parser._get_name(node.value.func)
+                dotted = route_parser._get_dotted_name(node.value.func)
+                if func_name in ("TestClient", "create_test_client") or (
+                    dotted
+                    and ("TestClient" in dotted or "create_test_client" in dotted)
+                ):
+                    for target in node.targets:
+                        if isinstance(target, ast.Name):
+                            test_client_vars.add(target.id)
+
+        if isinstance(node, ast.With):
+            for item in node.items:
+                if isinstance(item.context_expr, ast.Call):
+                    func_name = route_parser._get_name(item.context_expr.func)
+                    if func_name in ("TestClient", "create_test_client"):
+                        if item.optional_vars and isinstance(
+                            item.optional_vars, ast.Name
+                        ):
+                            test_client_vars.add(item.optional_vars.id)
+
+    if not test_client_vars:
+        return lenses
+
+    http_methods = {"get", "post", "put", "patch", "delete", "head", "options"}
+    resolved_routes = INDEX.build_resolved_routes()
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        if not isinstance(node.func, ast.Attribute):
+            continue
+        if node.func.attr not in http_methods:
+            continue
+        if not isinstance(node.func.value, ast.Name):
+            continue
+        if node.func.value.id not in test_client_vars:
+            continue
+
+        method = node.func.attr.upper()
+        path = ""
+        if node.args:
+            path = route_parser._get_string_value(node.args[0]) or ""
+
+        target = _find_matching_route(resolved_routes, method, path)
+        if target:
+            lens_range = lsp.Range(
+                start=lsp.Position(line=node.lineno - 1, character=node.col_offset),
+                end=lsp.Position(line=node.lineno - 1, character=node.col_offset + 1),
+            )
+            lenses.append(
+                lsp.CodeLens(
+                    range=lens_range,
+                    command=lsp.Command(
+                        title=f"Go to handler: {target.handler_name}",
+                        command="litestar.goToHandler",
+                        arguments=[target.uri, target.line],
+                    ),
+                )
+            )
+
+    return lenses
+
+
+def _find_matching_route(
+    routes: list[ws_index.ResolvedRoute], method: str, path: str
+) -> ws_index.ResolvedRoute | None:
+    """Find a resolved route matching the given HTTP method and path."""
+    for route in routes:
+        if method in route.http_methods and route.full_path == path:
+            return route
+    return None
 
 
 # **********************************************************
-# Formatting features ends here
+# Hover
 # **********************************************************
+
+
+@LSP_SERVER.feature(lsp.TEXT_DOCUMENT_HOVER)
+def hover(params: lsp.HoverParams) -> lsp.Hover | None:
+    """LSP handler for textDocument/hover — show resolved route info."""
+    document = LSP_SERVER.workspace.get_document(params.text_document.uri)
+    position = params.position
+
+    file_result = INDEX.get_file_result(document.uri)
+    if not file_result:
+        return None
+
+    for handler in file_result.handlers:
+        if handler.line - 1 <= position.line <= (handler.end_line - 1):
+            return _hover_for_handler(handler, document.uri)
+
+    for ctrl in file_result.controllers:
+        if ctrl.line - 1 <= position.line <= (ctrl.end_line - 1):
+            for handler in ctrl.handlers:
+                if handler.line - 1 <= position.line <= (handler.end_line - 1):
+                    return _hover_for_controller_handler(handler, ctrl, document.uri)
+
+    return None
+
+
+def _hover_for_handler(handler: route_parser.HandlerInfo, uri: str) -> lsp.Hover:
+    """Build hover content for a standalone handler."""
+    routes = INDEX.build_resolved_routes()
+    full_path = handler.path or "/"
+    for r in routes:
+        if r.handler_name == handler.name and r.uri == uri and r.line == handler.line:
+            full_path = r.full_path
+            break
+
+    methods_str = ", ".join(handler.http_methods)
+    lines = [
+        f"**{methods_str}** `{full_path}`",
+        "",
+        f"Handler: `{handler.name}`",
+    ]
+    if handler.return_type:
+        lines.append(f"Return type: `{handler.return_type}`")
+
+    _append_deps_and_guards(lines, uri, handler.line)
+
+    return lsp.Hover(
+        contents=lsp.MarkupContent(
+            kind=lsp.MarkupKind.Markdown,
+            value="\n".join(lines),
+        )
+    )
+
+
+def _hover_for_controller_handler(
+    handler: route_parser.HandlerInfo,
+    ctrl: route_parser.ControllerInfo,
+    uri: str,
+) -> lsp.Hover:
+    """Build hover content for a handler inside a controller."""
+    routes = INDEX.build_resolved_routes()
+    full_path = handler.path or "/"
+    for r in routes:
+        if r.handler_name == handler.name and r.uri == uri and r.line == handler.line:
+            full_path = r.full_path
+            break
+
+    methods_str = ", ".join(handler.http_methods)
+    lines = [
+        f"**{methods_str}** `{full_path}`",
+        "",
+        f"Controller: `{ctrl.name}` | Handler: `{handler.name}`",
+    ]
+    if handler.return_type:
+        lines.append(f"Return type: `{handler.return_type}`")
+
+    _append_deps_and_guards(lines, uri, handler.line)
+
+    return lsp.Hover(
+        contents=lsp.MarkupContent(
+            kind=lsp.MarkupKind.Markdown,
+            value="\n".join(lines),
+        )
+    )
+
+
+def _append_deps_and_guards(lines: list[str], uri: str, handler_line: int) -> None:
+    """Append dependency and guard info (with shadow warnings) to hover lines."""
+    dep_layers = INDEX.get_dependencies_for_handler(uri, handler_line)
+    if dep_layers:
+        chain = dep_resolver.resolve_dependency_chain(dep_layers)
+        lines.append("")
+        lines.append("**Dependencies:**")
+        for layer in chain.layers:
+            for key, val in layer.dependencies.items():
+                lines.append(
+                    f"- `{key}` = `{val}` (from {layer.layer_kind} `{layer.layer_name}`)"
+                )
+        if chain.shadowed:
+            lines.append("")
+            lines.append("**Shadowed dependencies:**")
+            for key, original, shadower in chain.shadowed:
+                lines.append(
+                    f"- `{key}`: {shadower.layer_kind} `{shadower.layer_name}` "
+                    f"overrides {original.layer_kind} `{original.layer_name}`"
+                )
+
+    guard_layers = INDEX.get_guards_for_handler(uri, handler_line)
+    if guard_layers:
+        chain = dep_resolver.resolve_guard_chain(guard_layers)
+        lines.append("")
+        lines.append("**Guards:**")
+        for layer in chain.layers:
+            for g in layer.guards:
+                lines.append(f"- `{g}` (from {layer.layer_kind} `{layer.layer_name}`)")
+
+
+# **********************************************************
+# Custom LSP methods.
+# **********************************************************
+
+
+@LSP_SERVER.feature("litestar/routes")
+def get_routes(params: Any = None) -> list[dict]:
+    """Custom LSP method: return the full route tree."""
+    tree = INDEX.build_route_tree()
+    return ws_index.route_tree_to_dict(tree)
+
+
+@LSP_SERVER.feature("litestar/dependencies")
+def get_dependencies(params: dict) -> list[dict]:
+    """Custom LSP method: return the dependency chain for a handler."""
+    uri = params.get("uri", "")
+    line = params.get("line", 0)
+    return INDEX.get_dependencies_for_handler(uri, line)
+
+
+@LSP_SERVER.feature("litestar/guards")
+def get_guards(params: dict) -> list[dict]:
+    """Custom LSP method: return the guard chain for a handler."""
+    uri = params.get("uri", "")
+    line = params.get("line", 0)
+    return INDEX.get_guards_for_handler(uri, line)
 
 
 # **********************************************************
 # Required Language Server Initialization and Exit handlers.
 # **********************************************************
+
+
 @LSP_SERVER.feature(lsp.INITIALIZE)
 def initialize(params: lsp.InitializeParams) -> None:
     """LSP handler for initialize request."""
@@ -276,6 +376,31 @@ def initialize(params: lsp.InitializeParams) -> None:
         f"Global settings:\r\n{json.dumps(GLOBAL_SETTINGS, indent=4, ensure_ascii=False)}\r\n"
     )
 
+    workspace_folders = params.workspace_folders
+    if workspace_folders:
+        for folder in workspace_folders:
+            folder_path = uris.to_fs_path(folder.uri)
+            log_to_output(f"Scanning workspace: {folder_path}")
+            INDEX.scan_workspace(folder_path)
+        INDEX.set_workspace_roots([uris.to_fs_path(f.uri) for f in workspace_folders])
+    else:
+        cwd = os.getcwd()
+        log_to_output(f"Scanning workspace (cwd): {cwd}")
+        INDEX.scan_workspace(cwd)
+        INDEX.set_workspace_roots([cwd])
+
+    tree = INDEX.build_route_tree()
+    log_to_output(f"Found {_count_handlers(tree)} route handlers in workspace")
+
+
+def _count_handlers(nodes: list[ws_index.RouteTreeNode]) -> int:
+    count = 0
+    for node in nodes:
+        if node.kind == "handler":
+            count += 1
+        count += _count_handlers(node.children)
+    return count
+
 
 @LSP_SERVER.feature(lsp.EXIT)
 def on_exit(_params: Optional[Any] = None) -> None:
@@ -292,26 +417,8 @@ def on_shutdown(_params: Optional[Any] = None) -> None:
 def get_cwd(settings: dict, document: Optional[workspace.Document]) -> str:
     """Returns the working directory for running the tool.
 
-    Resolves the following VS Code file-related variable substitutions when
-    a document is available:
-
-    - ``${file}`` – absolute path of the current document.
-    - ``${fileBasename}`` – file name with extension (e.g. ``foo.py``).
-    - ``${fileBasenameNoExtension}`` – file name without extension (e.g. ``foo``).
-    - ``${fileExtname}`` – file extension including the dot (e.g. ``.py``).
-    - ``${fileDirname}`` – directory containing the current document.
-    - ``${fileDirnameBasename}`` – name of the directory containing the document.
-    - ``${relativeFile}`` – document path relative to the workspace root.
-    - ``${relativeFileDirname}`` – document directory relative to the workspace root.
-    - ``${fileWorkspaceFolder}`` – workspace root folder for the document.
-
-    Variables that do not depend on the document (``${workspaceFolder}``,
-    ``${userHome}``, ``${cwd}``) are pre-resolved by the TypeScript client.
-
-    If no document is available and the value contains any unresolvable
-    file-variable, the workspace root is returned as a fallback.
-
-    See https://code.visualstudio.com/docs/reference/variables-reference
+    Resolves VS Code file-related variable substitutions when a document
+    is available. See https://code.visualstudio.com/docs/reference/variables-reference
     """
     cwd = settings.get("cwd", settings["workspaceFS"])
 
@@ -338,8 +445,6 @@ def get_cwd(settings: dict, document: Optional[workspace.Document]) -> str:
         for token, value in substitutions.items():
             cwd = cwd.replace(token, value)
     else:
-        # Without a document we cannot resolve file-related variables.
-        # Fall back to workspace root if any remain.
         if "${file" in cwd or "${relativeFile" in cwd:
             cwd = workspace_fs
 
@@ -394,7 +499,6 @@ def _get_document_key(document: workspace.Document):
         document_workspace = pathlib.Path(document.path)
         workspaces = {s["workspaceFS"] for s in WORKSPACE_SETTINGS.values()}
 
-        # Find workspace settings for the given file.
         while document_workspace != document_workspace.parent:
             if str(document_workspace) in workspaces:
                 return str(document_workspace)
@@ -409,7 +513,6 @@ def _get_settings_by_document(document: workspace.Document | None):
 
     key = _get_document_key(document)
     if key is None:
-        # This is either a non-workspace file or there is no workspace.
         key = os.fspath(pathlib.Path(document.path).parent)
         return {
             "cwd": key,
@@ -419,214 +522,6 @@ def _get_settings_by_document(document: workspace.Document | None):
         }
 
     return WORKSPACE_SETTINGS[str(key)]
-
-
-# *****************************************************
-# Internal execution APIs.
-# *****************************************************
-def _run_tool_on_document(
-    document: workspace.Document,
-    use_stdin: bool = False,
-    extra_args: Optional[Sequence[str]] = None,
-) -> utils.RunResult | None:
-    """Runs tool on the given document.
-
-    if use_stdin is true then contents of the document is passed to the
-    tool via stdin.
-    """
-    if extra_args is None:
-        extra_args = []
-    if str(document.uri).startswith("vscode-notebook-cell"):
-        # TODO: Decide on if you want to skip notebook cells.
-        # Skip notebook cells
-        return None
-
-    if utils.is_stdlib_file(document.path):
-        # TODO: Decide on if you want to skip standard library files.
-        # Skip standard library python files.
-        return None
-
-    # deep copy here to prevent accidentally updating global settings.
-    settings = copy.deepcopy(_get_settings_by_document(document))
-
-    code_workspace = settings["workspaceFS"]
-    # Pass document so get_cwd can resolve file-related variables for this document.
-    cwd = get_cwd(settings, document)
-
-    use_path = False
-    use_rpc = False
-    if settings["path"]:
-        # 'path' setting takes priority over everything.
-        use_path = True
-        argv = settings["path"]
-    elif settings["interpreter"] and not utils.is_current_interpreter(
-        settings["interpreter"][0]
-    ):
-        # If there is a different interpreter set use JSON-RPC to the subprocess
-        # running under that interpreter.
-        argv = [TOOL_MODULE]
-        use_rpc = True
-    else:
-        # if the interpreter is same as the interpreter running this
-        # process then run as module.
-        argv = [TOOL_MODULE]
-
-    argv += TOOL_ARGS + settings["args"] + extra_args
-
-    if use_stdin:
-        # TODO: update these to pass the appropriate arguments to provide document contents
-        # to tool via stdin.
-        # For example, for pylint args for stdin looks like this:
-        #     pylint --from-stdin <path>
-        # Here `--from-stdin` path is used by pylint to make decisions on the file contents
-        # that are being processed. Like, applying exclusion rules.
-        # It should look like this when you pass it:
-        #     argv += ["--from-stdin", document.path]
-        # Read up on how your tool handles contents via stdin. If stdin is not supported use
-        # set use_stdin to False, or provide path, what ever is appropriate for your tool.
-        argv += []
-    else:
-        argv += [document.path]
-
-    if use_path:
-        # This mode is used when running executables.
-        log_to_output(" ".join(argv))
-        log_to_output(f"CWD Server: {cwd}")
-        result = utils.run_path(
-            argv=argv,
-            use_stdin=use_stdin,
-            cwd=cwd,
-            source=document.source.replace("\r\n", "\n"),
-        )
-        if result.stderr:
-            log_to_output(result.stderr)
-    elif use_rpc:
-        # This mode is used if the interpreter running this server is different from
-        # the interpreter used for running this server.
-        log_to_output(" ".join(settings["interpreter"] + ["-m"] + argv))
-        log_to_output(f"CWD Linter: {cwd}")
-
-        result = jsonrpc.run_over_json_rpc(
-            workspace=code_workspace,
-            interpreter=settings["interpreter"],
-            module=TOOL_MODULE,
-            argv=argv,
-            use_stdin=use_stdin,
-            cwd=cwd,
-            source=document.source,
-        )
-        if result.exception:
-            log_error(result.exception)
-            result = utils.RunResult(result.stdout, result.stderr)
-        elif result.stderr:
-            log_to_output(result.stderr)
-    else:
-        # In this mode the tool is run as a module in the same process as the language server.
-        log_to_output(" ".join([sys.executable, "-m"] + argv))
-        log_to_output(f"CWD Linter: {cwd}")
-        # This is needed to preserve sys.path, in cases where the tool modifies
-        # sys.path and that might not work for this scenario next time around.
-        with utils.substitute_attr(sys, "path", sys.path[:]):
-            try:
-                # TODO: `utils.run_module` is equivalent to running `python -m <pytool-module>`.
-                # If your tool supports a programmatic API then replace the function below
-                # with code for your tool. You can also use `utils.run_api` helper, which
-                # handles changing working directories, managing io streams, etc.
-                # Also update `_run_tool` function and `utils.run_module` in `lsp_runner.py`.
-                result = utils.run_module(
-                    module=TOOL_MODULE,
-                    argv=argv,
-                    use_stdin=use_stdin,
-                    cwd=cwd,
-                    source=document.source,
-                )
-            except Exception:
-                log_error(traceback.format_exc(chain=True))
-                raise
-        if result.stderr:
-            log_to_output(result.stderr)
-
-    log_to_output(f"{document.uri} :\r\n{result.stdout}")
-    return result
-
-
-def _run_tool(extra_args: Sequence[str]) -> utils.RunResult:
-    """Runs tool."""
-    # deep copy here to prevent accidentally updating global settings.
-    settings = copy.deepcopy(_get_settings_by_document(None))
-
-    code_workspace = settings["workspaceFS"]
-    cwd = get_cwd(settings, None)
-
-    use_path = False
-    use_rpc = False
-    if len(settings["path"]) > 0:
-        # 'path' setting takes priority over everything.
-        use_path = True
-        argv = settings["path"]
-    elif len(settings["interpreter"]) > 0 and not utils.is_current_interpreter(
-        settings["interpreter"][0]
-    ):
-        # If there is a different interpreter set use JSON-RPC to the subprocess
-        # running under that interpreter.
-        argv = [TOOL_MODULE]
-        use_rpc = True
-    else:
-        # if the interpreter is same as the interpreter running this
-        # process then run as module.
-        argv = [TOOL_MODULE]
-
-    argv += extra_args
-
-    if use_path:
-        # This mode is used when running executables.
-        log_to_output(" ".join(argv))
-        log_to_output(f"CWD Server: {cwd}")
-        result = utils.run_path(argv=argv, use_stdin=True, cwd=cwd)
-        if result.stderr:
-            log_to_output(result.stderr)
-    elif use_rpc:
-        # This mode is used if the interpreter running this server is different from
-        # the interpreter used for running this server.
-        log_to_output(" ".join(settings["interpreter"] + ["-m"] + argv))
-        log_to_output(f"CWD Linter: {cwd}")
-        result = jsonrpc.run_over_json_rpc(
-            workspace=code_workspace,
-            interpreter=settings["interpreter"],
-            module=TOOL_MODULE,
-            argv=argv,
-            use_stdin=True,
-            cwd=cwd,
-        )
-        if result.exception:
-            log_error(result.exception)
-            result = utils.RunResult(result.stdout, result.stderr)
-        elif result.stderr:
-            log_to_output(result.stderr)
-    else:
-        # In this mode the tool is run as a module in the same process as the language server.
-        log_to_output(" ".join([sys.executable, "-m"] + argv))
-        log_to_output(f"CWD Linter: {cwd}")
-        # This is needed to preserve sys.path, in cases where the tool modifies
-        # sys.path and that might not work for this scenario next time around.
-        with utils.substitute_attr(sys, "path", sys.path[:]):
-            try:
-                # TODO: `utils.run_module` is equivalent to running `python -m <pytool-module>`.
-                # If your tool supports a programmatic API then replace the function below
-                # with code for your tool. You can also use `utils.run_api` helper, which
-                # handles changing working directories, managing io streams, etc.
-                # Also update `_run_tool_on_document` function and `utils.run_module` in `lsp_runner.py`.
-                result = utils.run_module(
-                    module=TOOL_MODULE, argv=argv, use_stdin=True, cwd=cwd
-                )
-            except Exception:
-                log_error(traceback.format_exc(chain=True))
-                raise
-        if result.stderr:
-            log_to_output(result.stderr)
-
-    log_to_output(f"\r\n{result.stdout}\r\n")
-    return result
 
 
 # *****************************************************
