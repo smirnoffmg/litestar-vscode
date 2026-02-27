@@ -1,6 +1,8 @@
 # Manual Test Plan
 
-## Prerequisites
+## How to install the dev package
+
+From the repo root, in a terminal:
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
@@ -9,10 +11,15 @@ nox --session setup
 npm install
 ```
 
+This creates a venv, installs nox, runs the project’s dev setup (Python deps, tooling), and installs Node dependencies. On Windows use `.venv\Scripts\activate` instead of `source .venv/bin/activate`.
+
 ## Launch
 
-Press **F5** in VS Code (or select "Debug Extension and Python" from the Run menu).
-This opens a new Extension Development Host window.
+1. Open the **Run and Debug** view (sidebar icon or `Ctrl+Shift+D` / `Cmd+Shift+D`).
+2. In the dropdown at the top of that panel, select **"Debug Extension and Python"**.
+3. Press **F5** (or click the green play button).
+
+This opens a new Extension Development Host window. If you don’t see "Debug Extension and Python" in the dropdown, ensure `.vscode/launch.json` is present and that the Python extension is installed.
 
 ---
 

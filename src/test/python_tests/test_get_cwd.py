@@ -29,50 +29,25 @@ def _setup_mocks():
         def show_message(self, *args, **kwargs):
             pass
 
-    mock_server = types.ModuleType("pygls.server")
-    mock_server.LanguageServer = _MockLS
+    # pygls v2: LanguageServer is in pygls.lsp.server
+    mock_lsp_server = types.ModuleType("pygls.lsp.server")
+    mock_lsp_server.LanguageServer = _MockLS
+    mock_lsp = types.ModuleType("pygls.lsp")
+    mock_lsp.server = mock_lsp_server
 
     mock_workspace = types.ModuleType("pygls.workspace")
-    mock_workspace.Document = type("Document", (), {"path": None})
+    mock_workspace.TextDocument = type("TextDocument", (), {"path": None})
 
     mock_uris = types.ModuleType("pygls.uris")
     mock_uris.from_fs_path = lambda p: "file://" + p
 
-    mock_lsp = types.ModuleType("lsprotocol.types")
-    for _name in [
-        "TEXT_DOCUMENT_DID_OPEN",
-        "TEXT_DOCUMENT_DID_SAVE",
-        "TEXT_DOCUMENT_DID_CLOSE",
-        "TEXT_DOCUMENT_FORMATTING",
-        "INITIALIZE",
-        "EXIT",
-        "SHUTDOWN",
-    ]:
-        setattr(mock_lsp, _name, _name)
-    for _name in [
-        "Diagnostic",
-        "DiagnosticSeverity",
-        "DidCloseTextDocumentParams",
-        "DidOpenTextDocumentParams",
-        "DidSaveTextDocumentParams",
-        "DocumentFormattingParams",
-        "InitializeParams",
-        "Position",
-        "Range",
-        "TextEdit",
-    ]:
-        setattr(mock_lsp, _name, type(_name, (), {}))
-    mock_lsp.MessageType = type(
-        "MessageType", (), {"Log": 4, "Error": 1, "Warning": 2, "Info": 3}
-    )
-
+    # Use real lsprotocol.types (installed via pygls); only mock pygls and bundled modules
     for _mod_name, _mod in [
         ("pygls", types.ModuleType("pygls")),
-        ("pygls.server", mock_server),
+        ("pygls.lsp", mock_lsp),
+        ("pygls.lsp.server", mock_lsp_server),
         ("pygls.workspace", mock_workspace),
         ("pygls.uris", mock_uris),
-        ("lsprotocol", types.ModuleType("lsprotocol")),
-        ("lsprotocol.types", mock_lsp),
         ("lsp_jsonrpc", types.ModuleType("lsp_jsonrpc")),
         ("lsp_utils", types.ModuleType("lsp_utils")),
     ]:
