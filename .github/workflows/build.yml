@@ -1,0 +1,48 @@
+name: Build VS Code Extension
+
+on:
+    push:
+        branches: [main, develop]
+    pull_request:
+        branches: [main, develop]
+    workflow_dispatch:
+
+jobs:
+    build:
+        name: Build extension
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            - name: Setup Node.js
+              uses: actions/setup-node@v4
+              with:
+                  node-version: '20'
+                  cache: 'npm'
+
+            - name: Install dependencies
+              run: npm ci
+
+            - name: Lint
+              run: npm run lint
+
+            - name: Build extension
+              run: npm run package
+
+            - name: Set develop version
+              if: github.ref == 'refs/heads/develop'
+              run: |
+                  SHORT_SHA="${GITHUB_SHA::7}"
+                  echo "SHORT_SHA=${SHORT_SHA}" >> "$GITHUB_ENV"
+                  VERSION=$(node -p "require('./package.json').version")
+                  npm version --no-git-tag-version "${VERSION}-develop.${SHORT_SHA}"
+
+            - name: Package VSIX
+              run: npx @vscode/vsce package -o litestar.vsix --no-dependencies
+
+            - name: Upload VSIX artifact
+              uses: actions/upload-artifact@v4
+              with:
+                  name: litestar-vsix-${{ github.ref == 'refs/heads/develop' && format('develop-{0}', env.SHORT_SHA) || 'release' }}
+                  path: litestar.vsix
