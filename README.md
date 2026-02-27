@@ -9,21 +9,23 @@ A Visual Studio Code extension for [Litestar](https://litestar.dev/) framework d
 
 ### Route Explorer
 
-Hierarchical tree view of all routes in your Litestar application. Displays the full routing structure — `Litestar` app → `Router` → `Controller` → handler — with HTTP method, path, and handler type indicators. Click any route to jump directly to its definition.
+Hierarchical tree view of all routes in your Litestar application. Displays the full routing structure — `Litestar` app → `Router` → `Controller` → handler — with HTTP method, path, and handler type indicators. Dependencies and guards are shown inline for each node. Click any route to jump directly to its definition.
 
-<!-- TODO: Add GIF/screenshot of Route Explorer -->
+![Route Explorer](docs/route-explorer.png)
 
 ### Route Search
 
 Quickly search across all routes by path, HTTP method, handler name, or controller using `Ctrl+Shift+E` (`Cmd+Shift+E` on Mac).
 
-<!-- TODO: Add GIF/screenshot of Route Search -->
+![Route Search](docs/route-search.png)
 
 ### CodeLens for Test Client
 
-CodeLens links appear above test client calls like `client.get("/items")` using Litestar's `TestClient` or `create_test_client`, letting you jump directly to the matching route handler definition.
+CodeLens links appear above test client calls like `client.get("/items")` using Litestar's `TestClient` or `create_test_client`, letting you jump directly to the matching route handler definition. Each link shows the handler name (e.g. "Go to handler: list_items"); click to jump to the route.
 
-<!-- TODO: Add GIF/screenshot of CodeLens -->
+![CodeLens for Test Client](docs/codelens.png)
+
+To try it: open [docs/codelens_test_example.py](docs/codelens_test_example.py) in a Litestar workspace with the extension enabled and look for the links above each `client.get(...)` / `client.post(...)` line.
 
 ### Diagnostics
 

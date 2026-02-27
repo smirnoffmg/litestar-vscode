@@ -42,6 +42,7 @@ class RouteTreeItem extends vscode.TreeItem {
         super(RouteTreeItem.buildLabel(data), collapsibleState);
 
         this.tooltip = RouteTreeItem.buildTooltip(data);
+        this.description = RouteTreeItem.buildDescription(data);
         this.iconPath = RouteTreeItem.pickIcon(data);
         this.contextValue = data.kind;
 
@@ -75,6 +76,23 @@ class RouteTreeItem extends vscode.TreeItem {
             return `${data.label} [${data.path || '/'}]`;
         }
         return data.label;
+    }
+
+    private static buildDescription(data: RouteTreeData): string | undefined {
+        const parts: string[] = [];
+        const depEntries =
+            data.dependencies && Object.keys(data.dependencies).length > 0
+                ? Object.entries(data.dependencies)
+                      .map(([k, v]) => `${k} → ${v}`)
+                      .join(', ')
+                : '';
+        if (depEntries) {
+            parts.push(`Dependencies: ${depEntries}`);
+        }
+        if (data.guards?.length) {
+            parts.push(`Guards: ${data.guards.join(', ')}`);
+        }
+        return parts.length ? parts.join('  ·  ') : undefined;
     }
 
     private static buildTooltip(data: RouteTreeData): string {
@@ -142,67 +160,8 @@ export class RouteTreeProvider implements vscode.TreeDataProvider<RouteTreeItem>
         }
 
         const data = element.data;
-
-        // Synthetic groups: expand to list of dependency or guard entries
-        if (data.kind === 'dependenciesGroup' && data.dependencies) {
-            return Object.entries(data.dependencies).map(([key, value]) =>
-                this.toTreeItem({
-                    ...this.emptyNode(),
-                    kind: 'dependency',
-                    label: `${key} → ${value}`,
-                    dependencies: {},
-                    guards: [],
-                }),
-            );
-        }
-        if (data.kind === 'guardsGroup' && data.guards.length > 0) {
-            return data.guards.map((g) =>
-                this.toTreeItem({
-                    ...this.emptyNode(),
-                    kind: 'guard',
-                    label: g,
-                    dependencies: {},
-                    guards: [],
-                }),
-            );
-        }
-
-        // App, router, controller: prepend Dependencies and Guards groups if present
-        const hasDeps = data.dependencies && Object.keys(data.dependencies).length > 0;
-        const hasGuards = data.guards && data.guards.length > 0;
-        const isContainer = data.kind === 'app' || data.kind === 'router' || data.kind === 'controller';
-
-        const children: RouteTreeItem[] = [];
-        if (isContainer && hasDeps) {
-            children.push(
-                this.toTreeItem(
-                    {
-                        ...this.emptyNode(),
-                        kind: 'dependenciesGroup',
-                        label: 'Dependencies',
-                        dependencies: data.dependencies,
-                        guards: [],
-                    },
-                    vscode.TreeItemCollapsibleState.Collapsed,
-                ),
-            );
-        }
-        if (isContainer && hasGuards) {
-            children.push(
-                this.toTreeItem(
-                    {
-                        ...this.emptyNode(),
-                        kind: 'guardsGroup',
-                        label: 'Guards',
-                        dependencies: {},
-                        guards: data.guards,
-                    },
-                    vscode.TreeItemCollapsibleState.Collapsed,
-                ),
-            );
-        }
         const routeChildren = (data.children || []).map((item) => this.toTreeItem(item));
-        return [...children, ...routeChildren];
+        return routeChildren;
     }
 
     private emptyNode(): RouteTreeData {

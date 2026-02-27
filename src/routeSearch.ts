@@ -47,11 +47,15 @@ export async function searchRoutes(provider: RouteTreeProvider): Promise<void> {
         return;
     }
 
-    const items: vscode.QuickPickItem[] = routes.map((r) => ({
-        label: `$(symbol-method) [${r.methods}] ${r.fullPath}`,
-        description: r.handlerName,
-        detail: `${vscode.Uri.parse(r.uri).fsPath}:${r.line}`,
-    }));
+    const items: vscode.QuickPickItem[] = routes.map((r) => {
+        const uri = vscode.Uri.parse(r.uri);
+        const relativePath = vscode.workspace.asRelativePath(uri);
+        return {
+            label: `$(symbol-method) [${r.methods}] ${r.fullPath}`,
+            description: r.handlerName,
+            detail: `${relativePath}:${r.line}`,
+        };
+    });
 
     const selected = await vscode.window.showQuickPick(items, {
         placeHolder: 'Search routes by path, method, or handler name...',
