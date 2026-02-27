@@ -227,3 +227,63 @@ async def get_item(item_id: int) -> dict:
 """
     result = parse_file(source, "file:///test.py")
     assert result.handlers[0].path == "/items/{item_id:int}"
+
+
+def test_parse_app_with_variable_dependencies_and_plugins():
+    """Litestar(dependencies=app_dependencies, plugins=plugins) resolves variables to actual dict/list."""
+    source = """
+from litestar import Litestar
+from litestar.di import Provide
+
+app_dependencies = {
+    "auth_config": Provide(provide_auth_config),
+    "filin_client": Provide(provide_filin_client),
+}
+plugins = [SentryPlugin(), CorsarPlugin(), PydanticPlugin(prefer_alias=True)]
+
+app = Litestar(
+    dependencies=app_dependencies,
+    plugins=plugins,
+    route_handlers=[router],
+)
+"""
+    result = parse_file(source, "file:///test.py")
+    assert len(result.apps) == 1
+    app = result.apps[0]
+    assert app.variable_name == "app"
+    assert app.dependencies == {
+        "auth_config": "provide_auth_config",
+        "filin_client": "provide_filin_client",
+    }
+    assert app.plugin_names == ["SentryPlugin", "CorsarPlugin", "PydanticPlugin"]
+    assert app.route_handler_names == ["router"]
+
+
+def test_parse_factory_app_with_local_dependencies_and_plugins():
+    """create_app() that defines app_dependencies and plugins locally and returns Litestar(...) resolves them."""
+    source = """
+from litestar import Litestar
+from litestar.di import Provide
+
+def create_app() -> Litestar:
+    app_dependencies = {
+        "auth_config": Provide(dependencies.provide_auth_config),
+        "filin_client": Provide(dependencies.provide_filin_client),
+    }
+    plugins = [SentryPlugin(), CorsarPlugin(), PydanticPlugin(prefer_alias=True)]
+    return Litestar(
+        dependencies=app_dependencies,
+        plugins=plugins,
+        route_handlers=[router],
+    )
+"""
+    result = parse_file(source, "file:///test.py")
+    assert len(result.apps) == 1
+    app = result.apps[0]
+    assert app.variable_name == "create_app"
+    assert app.dependencies == {
+        "auth_config": "provide_auth_config",
+        "filin_client": "provide_filin_client",
+    }
+    assert app.plugin_names == ["SentryPlugin", "CorsarPlugin", "PydanticPlugin"]
+    assert app.route_handler_names == ["router"]

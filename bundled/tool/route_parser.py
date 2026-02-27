@@ -383,6 +383,47 @@ def _get_call_keyword(call: ast.Call, keyword: str) -> ast.expr | None:
     return None
 
 
+def _collect_module_level_bindings(tree: ast.Module) -> dict[str, ast.expr]:
+    """Build a map of top-level variable names to their value nodes (same file only).
+    Enables resolving Litestar(dependencies=app_dependencies, plugins=plugins) to actual dict/list.
+    """
+    bindings: dict[str, ast.expr] = {}
+    for stmt in tree.body:
+        if isinstance(stmt, ast.Assign) and len(stmt.targets) == 1:
+            target = stmt.targets[0]
+            if isinstance(target, ast.Name):
+                bindings[target.id] = stmt.value
+        elif (
+            isinstance(stmt, ast.AnnAssign)
+            and isinstance(stmt.target, ast.Name)
+            and stmt.value is not None
+        ):
+            bindings[stmt.target.id] = stmt.value
+    return bindings
+
+
+def _collect_function_level_bindings(
+    node: ast.FunctionDef | ast.AsyncFunctionDef,
+) -> dict[str, ast.expr]:
+    """Build a map of names to value nodes from a function body (for factory pattern).
+    Enables resolving return Litestar(dependencies=app_dependencies, plugins=plugins)
+    when app_dependencies and plugins are defined inside the same function.
+    """
+    bindings: dict[str, ast.expr] = {}
+    for stmt in node.body:
+        if isinstance(stmt, ast.Assign) and len(stmt.targets) == 1:
+            target = stmt.targets[0]
+            if isinstance(target, ast.Name):
+                bindings[target.id] = stmt.value
+        elif (
+            isinstance(stmt, ast.AnnAssign)
+            and isinstance(stmt.target, ast.Name)
+            and stmt.value is not None
+        ):
+            bindings[stmt.target.id] = stmt.value
+    return bindings
+
+
 def _is_litestar_call(call: ast.Call, imports: dict[str, str]) -> bool:
     """Return True if the call is to Litestar (by name or resolved import)."""
     func_name = _get_name(call.func)
@@ -472,11 +513,33 @@ def _get_func_params(node: ast.FunctionDef | ast.AsyncFunctionDef) -> list[str]:
 class _FileVisitor(ast.NodeVisitor):
     """Visit an AST to extract Litestar constructs."""
 
-    def __init__(self, uri: str, resolved_imports: dict[str, str]) -> None:
+    def __init__(
+        self,
+        uri: str,
+        resolved_imports: dict[str, str],
+        name_bindings: dict[str, ast.expr] | None = None,
+    ) -> None:
         self.uri = uri
         self.result = FileParseResult(uri=uri)
         self.result.imports = resolved_imports
+        self._name_bindings = name_bindings or {}
         self._current_class: ControllerInfo | None = None
+
+    def _resolve(
+        self,
+        node: ast.expr,
+        local_bindings: dict[str, ast.expr] | None = None,
+    ) -> ast.expr:
+        """Resolve a variable reference to its value node.
+        Checks local_bindings (e.g. from function body) first, then module-level bindings.
+        """
+        if not isinstance(node, ast.Name):
+            return node
+        if local_bindings is not None and node.id in local_bindings:
+            return local_bindings[node.id]
+        if node.id in self._name_bindings:
+            return self._name_bindings[node.id]
+        return node
 
     def visit_Import(self, node: ast.Import) -> None:
         for alias in node.names:
@@ -607,7 +670,11 @@ class _FileVisitor(ast.NodeVisitor):
     def _try_register_factory_app(
         self, node: ast.FunctionDef | ast.AsyncFunctionDef
     ) -> None:
-        """If the function body has a direct return Litestar(...), register it as an app."""
+        """If the function body has a direct return Litestar(...), register it as an app.
+        Resolves names using bindings from this function's body (e.g. app_dependencies, plugins
+        defined inside create_app()) so we get actual dependencies/plugins, not empty.
+        """
+        local_bindings = _collect_function_level_bindings(node)
         for stmt in node.body:
             if not isinstance(stmt, ast.Return) or stmt.value is None:
                 continue
@@ -624,18 +691,28 @@ class _FileVisitor(ast.NodeVisitor):
             )
             rh = _get_call_keyword(call, "route_handlers")
             if rh is not None:
-                app.route_handler_names = _extract_list_names(rh)
+                app.route_handler_names = _extract_list_names(
+                    self._resolve(rh, local_bindings)
+                )
             elif call.args:
-                app.route_handler_names = _extract_list_names(call.args[0])
+                app.route_handler_names = _extract_list_names(
+                    self._resolve(call.args[0], local_bindings)
+                )
             guards_kw = _get_call_keyword(call, "guards")
             if guards_kw is not None:
-                app.guards = _extract_guard_names(guards_kw)
+                app.guards = _extract_guard_names(
+                    self._resolve(guards_kw, local_bindings)
+                )
             deps_kw = _get_call_keyword(call, "dependencies")
             if deps_kw is not None:
-                app.dependencies = _extract_dict_dependencies(deps_kw)
+                app.dependencies = _extract_dict_dependencies(
+                    self._resolve(deps_kw, local_bindings)
+                )
             plugins_kw = _get_call_keyword(call, "plugins")
             if plugins_kw is not None:
-                app.plugin_names = _extract_plugin_names(plugins_kw)
+                app.plugin_names = _extract_plugin_names(
+                    self._resolve(plugins_kw, local_bindings)
+                )
             self.result.apps.append(app)
             break
 
@@ -694,18 +771,20 @@ class _FileVisitor(ast.NodeVisitor):
             )
             rh = _get_call_keyword(call, "route_handlers")
             if rh is not None:
-                app.route_handler_names = _extract_list_names(rh)
+                app.route_handler_names = _extract_list_names(self._resolve(rh))
             elif call.args:
-                app.route_handler_names = _extract_list_names(call.args[0])
+                app.route_handler_names = _extract_list_names(
+                    self._resolve(call.args[0])
+                )
             guards_kw = _get_call_keyword(call, "guards")
             if guards_kw is not None:
-                app.guards = _extract_guard_names(guards_kw)
+                app.guards = _extract_guard_names(self._resolve(guards_kw))
             deps_kw = _get_call_keyword(call, "dependencies")
             if deps_kw is not None:
-                app.dependencies = _extract_dict_dependencies(deps_kw)
+                app.dependencies = _extract_dict_dependencies(self._resolve(deps_kw))
             plugins_kw = _get_call_keyword(call, "plugins")
             if plugins_kw is not None:
-                app.plugin_names = _extract_plugin_names(plugins_kw)
+                app.plugin_names = _extract_plugin_names(self._resolve(plugins_kw))
             self.result.apps.append(app)
 
         elif func_name == "Router" or resolved.endswith("Router"):
@@ -723,13 +802,13 @@ class _FileVisitor(ast.NodeVisitor):
                 router.path = _get_string_value(path_kw) or router.path
             rh = _get_call_keyword(call, "route_handlers")
             if rh is not None:
-                router.route_handler_names = _extract_list_names(rh)
+                router.route_handler_names = _extract_list_names(self._resolve(rh))
             guards_kw = _get_call_keyword(call, "guards")
             if guards_kw is not None:
-                router.guards = _extract_guard_names(guards_kw)
+                router.guards = _extract_guard_names(self._resolve(guards_kw))
             deps_kw = _get_call_keyword(call, "dependencies")
             if deps_kw is not None:
-                router.dependencies = _extract_dict_dependencies(deps_kw)
+                router.dependencies = _extract_dict_dependencies(self._resolve(deps_kw))
             self.result.routers.append(router)
 
 
@@ -748,6 +827,7 @@ def parse_file(source: str, uri: str) -> FileParseResult:
     except SyntaxError:
         return FileParseResult(uri=uri)
 
-    visitor = _FileVisitor(uri, {})
+    name_bindings = _collect_module_level_bindings(tree)
+    visitor = _FileVisitor(uri, {}, name_bindings)
     visitor.visit(tree)
     return visitor.result
