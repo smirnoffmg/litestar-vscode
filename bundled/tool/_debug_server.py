@@ -23,16 +23,20 @@ if debugger_path:
     update_sys_path(debugger_path)
 
     # pylint: disable=wrong-import-position,import-error
-    import debugpy
+    import debugpy  # pyright: ignore[reportMissingImports]
 
-    # 5678 is the default port, If you need to change it update it here
-    # and in launch.json.
-    debugpy.connect(5678)
-
-    # This will ensure that execution is paused as soon as the debugger
-    # connects to VS Code. If you don't want to pause here comment this
-    # line and set breakpoints as appropriate.
-    debugpy.breakpoint()
+    try:
+        # 5678 is the default port. If you need to change it update it here
+        # and in launch.json. Start "Attach to Server" in VS Code before
+        # launching the extension when you want to debug the server.
+        debugpy.connect(5678)
+        # Pause as soon as the debugger connects. Comment out to run without stopping.
+        debugpy.breakpoint()
+    except (ConnectionRefusedError, OSError) as e:
+        # No debugger listening on 5678 (e.g. extension started without Attach).
+        # Run the server normally so the extension still works.
+        sys.stderr.write(f"[Litestar LSP] Debug connect skipped: {e}\n")
+        sys.stderr.flush()
 
 SERVER_PATH = os.fspath(pathlib.Path(__file__).parent / "lsp_server.py")
 # NOTE: Set breakpoint in `lsp_server.py` before continuing.

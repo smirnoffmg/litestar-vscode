@@ -62,11 +62,27 @@ class RouterInfo:
 class AppInfo:
     variable_name: str
     route_handler_names: list[str] = field(default_factory=list)
+    plugin_names: list[str] = field(default_factory=list)
     line: int = 0
     end_line: int = 0
     uri: str = ""
     guards: list[str] = field(default_factory=list)
     dependencies: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass
+class PluginInfo:
+    """InitPlugin subclass: contributes route_handlers, dependencies, and nested plugins via on_app_init(app_config)."""
+
+    name: str  # class name
+    route_handler_names: list[str] = field(default_factory=list)
+    nested_plugin_names: list[str] = field(
+        default_factory=list
+    )  # from app_config.plugins.extend([...])
+    dependencies: dict[str, str] = field(default_factory=dict)
+    line: int = 0
+    end_line: int = 0
+    uri: str = ""
 
 
 @dataclass
@@ -76,6 +92,11 @@ class FileParseResult:
     controllers: list[ControllerInfo] = field(default_factory=list)
     routers: list[RouterInfo] = field(default_factory=list)
     apps: list[AppInfo] = field(default_factory=list)
+    plugins: list[PluginInfo] = field(default_factory=list)
+    # Variable assigned to a call, e.g. domain = DomainPlugin() -> ("domain", "DomainPlugin")
+    plugin_var_to_class: dict[str, str] = field(default_factory=dict)
+    # All single-target call assignments (var, callee) for cross-file plugin resolution
+    call_assignments: list[tuple[str, str]] = field(default_factory=list)
     imports: dict[str, str] = field(default_factory=dict)
 
 
@@ -114,6 +135,205 @@ def _extract_list_names(node: ast.expr) -> list[str]:
             name = _get_name(elt)
             if name:
                 names.append(name)
+    return names
+
+
+def _extract_plugin_names(node: ast.expr) -> list[str]:
+    """Extract plugin class/variable names from a list literal, e.g. [MyPlugin(), foo].
+    Handles both Call (MyPlugin()) and Name (some_plugin) elements.
+    """
+    names: list[str] = []
+    if isinstance(node, ast.List):
+        for elt in node.elts:
+            if isinstance(elt, ast.Call):
+                name = _get_name(elt.func)
+            elif isinstance(elt, ast.Name):
+                name = elt.id
+            else:
+                name = _get_name(elt)
+            if name:
+                names.append(name)
+    return names
+
+
+def _get_config_param_name(
+    on_app_init: ast.FunctionDef | ast.AsyncFunctionDef,
+) -> str | None:
+    """Return the name of the app_config parameter (first non-self argument)."""
+    for arg in on_app_init.args.args:
+        if arg.arg != "self":
+            return arg.arg
+    return None
+
+
+def _extract_plugin_route_handlers(class_node: ast.ClassDef) -> list[str]:
+    """From an InitPlugin class, extract handler names from on_app_init(app_config).
+    Looks for app_config.route_handlers.append(x), .extend([...]), and += [...].
+    """
+    names: list[str] = []
+    on_app_init: ast.FunctionDef | ast.AsyncFunctionDef | None = None
+    for stmt in class_node.body:
+        if (
+            isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and stmt.name == "on_app_init"
+        ):
+            on_app_init = stmt
+            break
+    if not on_app_init or not on_app_init.args.args:
+        return names
+    param_name = _get_config_param_name(on_app_init)
+    if not param_name:
+        return names
+    for node in ast.walk(on_app_init):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            if node.func.attr not in ("append", "extend"):
+                continue
+            if (
+                not isinstance(node.func.value, ast.Attribute)
+                or node.func.value.attr != "route_handlers"
+            ):
+                continue
+            if (
+                not isinstance(node.func.value.value, ast.Name)
+                or node.func.value.value.id != param_name
+            ):
+                continue
+            if node.func.attr == "append" and node.args:
+                name = _get_name(node.args[0])
+                if name:
+                    names.append(name)
+            elif node.func.attr == "extend" and node.args:
+                names.extend(_extract_list_names(node.args[0]))
+        elif isinstance(node, ast.AugAssign) and isinstance(node.op, ast.Add):
+            # app_config.route_handlers += [a, b]
+            if (
+                not isinstance(node.target, ast.Attribute)
+                or node.target.attr != "route_handlers"
+            ):
+                continue
+            if (
+                not isinstance(node.target.value, ast.Name)
+                or node.target.value.id != param_name
+            ):
+                continue
+            names.extend(_extract_list_names(node.value))
+    return names
+
+
+def _extract_plugin_dependencies(class_node: ast.ClassDef) -> dict[str, str]:
+    """From an InitPlugin class, extract app_config.dependencies[key] = value in on_app_init."""
+    deps: dict[str, str] = {}
+    on_app_init: ast.FunctionDef | ast.AsyncFunctionDef | None = None
+    for stmt in class_node.body:
+        if (
+            isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and stmt.name == "on_app_init"
+        ):
+            on_app_init = stmt
+            break
+    if not on_app_init:
+        return deps
+    param_name = _get_config_param_name(on_app_init)
+    if not param_name:
+        return deps
+    for node in ast.walk(on_app_init):
+        # app_config.dependencies["key"] = value  (Assign with Subscript target)
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if not isinstance(target, ast.Subscript):
+                    continue
+                if (
+                    not isinstance(target.value, ast.Attribute)
+                    or target.value.attr != "dependencies"
+                ):
+                    continue
+                if (
+                    not isinstance(target.value.value, ast.Name)
+                    or target.value.value.id != param_name
+                ):
+                    continue
+                key = (
+                    _get_string_value(target.slice)
+                    if isinstance(target.slice, ast.Constant)
+                    else None
+                )
+                if key:
+                    val_name = _get_name(node.value)
+                    if val_name:
+                        deps[key] = val_name
+                    elif (
+                        isinstance(node.value, ast.Call)
+                        and _get_name(node.value.func) == "Provide"
+                        and node.value.args
+                    ):
+                        deps[key] = _get_name(node.value.args[0]) or "Provide(...)"
+                    else:
+                        deps[key] = _get_dotted_name(node.value) or "..."
+        # app_config.dependencies.update({...})
+        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            if node.func.attr != "update":
+                continue
+            if (
+                not isinstance(node.func.value, ast.Attribute)
+                or node.func.value.attr != "dependencies"
+            ):
+                continue
+            if (
+                not isinstance(node.func.value.value, ast.Name)
+                or node.func.value.value.id != param_name
+            ):
+                continue
+            if node.args and isinstance(node.args[0], ast.Dict):
+                for k, v in zip(node.args[0].keys, node.args[0].values):
+                    key = _get_string_value(k) if k else None
+                    if key:
+                        if (
+                            isinstance(v, ast.Call)
+                            and _get_name(v.func) == "Provide"
+                            and v.args
+                        ):
+                            deps[key] = (
+                                _get_name(v.args[0])
+                                or _get_dotted_name(v.args[0])
+                                or "Provide(...)"
+                            )
+                        else:
+                            deps[key] = _get_name(v) or _get_dotted_name(v) or "..."
+    return deps
+
+
+def _extract_plugin_nested_plugins(class_node: ast.ClassDef) -> list[str]:
+    """From an InitPlugin class, extract plugin names from app_config.plugins.extend([...])."""
+    names: list[str] = []
+    on_app_init: ast.FunctionDef | ast.AsyncFunctionDef | None = None
+    for stmt in class_node.body:
+        if (
+            isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and stmt.name == "on_app_init"
+        ):
+            on_app_init = stmt
+            break
+    if not on_app_init:
+        return names
+    param_name = _get_config_param_name(on_app_init)
+    if not param_name:
+        return names
+    for node in ast.walk(on_app_init):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            if node.func.attr != "extend":
+                continue
+            if (
+                not isinstance(node.func.value, ast.Attribute)
+                or node.func.value.attr != "plugins"
+            ):
+                continue
+            if (
+                not isinstance(node.func.value.value, ast.Name)
+                or node.func.value.value.id != param_name
+            ):
+                continue
+            if node.args and isinstance(node.args[0], ast.List):
+                names.extend(_extract_plugin_names(node.args[0]))
     return names
 
 
@@ -161,6 +381,56 @@ def _get_call_keyword(call: ast.Call, keyword: str) -> ast.expr | None:
         if kw.arg == keyword:
             return kw.value
     return None
+
+
+def _collect_module_level_bindings(tree: ast.Module) -> dict[str, ast.expr]:
+    """Build a map of top-level variable names to their value nodes (same file only).
+    Enables resolving Litestar(dependencies=app_dependencies, plugins=plugins) to actual dict/list.
+    """
+    bindings: dict[str, ast.expr] = {}
+    for stmt in tree.body:
+        if isinstance(stmt, ast.Assign) and len(stmt.targets) == 1:
+            target = stmt.targets[0]
+            if isinstance(target, ast.Name):
+                bindings[target.id] = stmt.value
+        elif (
+            isinstance(stmt, ast.AnnAssign)
+            and isinstance(stmt.target, ast.Name)
+            and stmt.value is not None
+        ):
+            bindings[stmt.target.id] = stmt.value
+    return bindings
+
+
+def _collect_function_level_bindings(
+    node: ast.FunctionDef | ast.AsyncFunctionDef,
+) -> dict[str, ast.expr]:
+    """Build a map of names to value nodes from a function body (for factory pattern).
+    Enables resolving return Litestar(dependencies=app_dependencies, plugins=plugins)
+    when app_dependencies and plugins are defined inside the same function.
+    """
+    bindings: dict[str, ast.expr] = {}
+    for stmt in node.body:
+        if isinstance(stmt, ast.Assign) and len(stmt.targets) == 1:
+            target = stmt.targets[0]
+            if isinstance(target, ast.Name):
+                bindings[target.id] = stmt.value
+        elif (
+            isinstance(stmt, ast.AnnAssign)
+            and isinstance(stmt.target, ast.Name)
+            and stmt.value is not None
+        ):
+            bindings[stmt.target.id] = stmt.value
+    return bindings
+
+
+def _is_litestar_call(call: ast.Call, imports: dict[str, str]) -> bool:
+    """Return True if the call is to Litestar (by name or resolved import)."""
+    func_name = _get_name(call.func)
+    if func_name is None:
+        return False
+    resolved = imports.get(func_name, func_name)
+    return func_name == "Litestar" or resolved.endswith("Litestar")
 
 
 def _has_keyword_true(call: ast.Call, keyword: str) -> bool:
@@ -243,11 +513,33 @@ def _get_func_params(node: ast.FunctionDef | ast.AsyncFunctionDef) -> list[str]:
 class _FileVisitor(ast.NodeVisitor):
     """Visit an AST to extract Litestar constructs."""
 
-    def __init__(self, uri: str, resolved_imports: dict[str, str]) -> None:
+    def __init__(
+        self,
+        uri: str,
+        resolved_imports: dict[str, str],
+        name_bindings: dict[str, ast.expr] | None = None,
+    ) -> None:
         self.uri = uri
         self.result = FileParseResult(uri=uri)
         self.result.imports = resolved_imports
+        self._name_bindings = name_bindings or {}
         self._current_class: ControllerInfo | None = None
+
+    def _resolve(
+        self,
+        node: ast.expr,
+        local_bindings: dict[str, ast.expr] | None = None,
+    ) -> ast.expr:
+        """Resolve a variable reference to its value node.
+        Checks local_bindings (e.g. from function body) first, then module-level bindings.
+        """
+        if not isinstance(node, ast.Name):
+            return node
+        if local_bindings is not None and node.id in local_bindings:
+            return local_bindings[node.id]
+        if node.id in self._name_bindings:
+            return self._name_bindings[node.id]
+        return node
 
     def visit_Import(self, node: ast.Import) -> None:
         for alias in node.names:
@@ -314,6 +606,28 @@ class _FileVisitor(ast.NodeVisitor):
             self._current_class = prev
             self.result.controllers.append(controller)
         else:
+            # Check for InitPlugin subclass (adds routes via on_app_init)
+            is_init_plugin = False
+            for base in node.bases:
+                base_name = _get_name(base)
+                if base_name == "InitPlugin":
+                    is_init_plugin = True
+                    break
+                resolved = self.result.imports.get(base_name or "")
+                if resolved and "InitPlugin" in resolved:
+                    is_init_plugin = True
+                    break
+            if is_init_plugin:
+                plugin = PluginInfo(
+                    name=node.name,
+                    line=node.lineno,
+                    end_line=node.end_lineno or node.lineno,
+                    uri=self.uri,
+                )
+                plugin.route_handler_names = _extract_plugin_route_handlers(node)
+                plugin.nested_plugin_names = _extract_plugin_nested_plugins(node)
+                plugin.dependencies = _extract_plugin_dependencies(node)
+                self.result.plugins.append(plugin)
             self.generic_visit(node)
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
@@ -348,13 +662,86 @@ class _FileVisitor(ast.NodeVisitor):
             else:
                 self.result.handlers.append(handler)
             break
+        else:
+            # No handler decorator; check for factory pattern: return Litestar(...)
+            if self._current_class is None:
+                self._try_register_factory_app(node)
+
+    def _try_register_factory_app(
+        self, node: ast.FunctionDef | ast.AsyncFunctionDef
+    ) -> None:
+        """If the function body has a direct return Litestar(...), register it as an app.
+        Resolves names using bindings from this function's body (e.g. app_dependencies, plugins
+        defined inside create_app()) so we get actual dependencies/plugins, not empty.
+        """
+        local_bindings = _collect_function_level_bindings(node)
+        for stmt in node.body:
+            if not isinstance(stmt, ast.Return) or stmt.value is None:
+                continue
+            if not isinstance(stmt.value, ast.Call):
+                continue
+            call = stmt.value
+            if not _is_litestar_call(call, self.result.imports):
+                continue
+            app = AppInfo(
+                variable_name=node.name,
+                line=node.lineno,
+                end_line=node.end_lineno or node.lineno,
+                uri=self.uri,
+            )
+            rh = _get_call_keyword(call, "route_handlers")
+            if rh is not None:
+                app.route_handler_names = _extract_list_names(
+                    self._resolve(rh, local_bindings)
+                )
+            elif call.args:
+                app.route_handler_names = _extract_list_names(
+                    self._resolve(call.args[0], local_bindings)
+                )
+            guards_kw = _get_call_keyword(call, "guards")
+            if guards_kw is not None:
+                app.guards = _extract_guard_names(
+                    self._resolve(guards_kw, local_bindings)
+                )
+            deps_kw = _get_call_keyword(call, "dependencies")
+            if deps_kw is not None:
+                app.dependencies = _extract_dict_dependencies(
+                    self._resolve(deps_kw, local_bindings)
+                )
+            plugins_kw = _get_call_keyword(call, "plugins")
+            if plugins_kw is not None:
+                app.plugin_names = _extract_plugin_names(
+                    self._resolve(plugins_kw, local_bindings)
+                )
+            self.result.apps.append(app)
+            break
 
     def visit_Assign(self, node: ast.Assign) -> None:
         if isinstance(node.value, ast.Call):
             self._check_call_assignment(
                 node.value, node.targets, node.lineno, node.end_lineno
             )
+            self._record_plugin_instance_if_any(node)
         self.generic_visit(node)
+
+    def _record_plugin_instance_if_any(self, node: ast.Assign) -> None:
+        """Record variable = Something() for cross-file plugin resolution; same-file plugin class -> var."""
+        if not node.targets or not isinstance(node.targets[0], ast.Name):
+            return
+        var_name = node.targets[0].id
+        if not isinstance(node.value, ast.Call):
+            return
+        callee = _get_name(node.value.func)
+        if not callee:
+            return
+        self.result.call_assignments.append((var_name, callee))
+        resolved = self.result.imports.get(callee, callee)
+        for p in self.result.plugins:
+            if p.name == callee or (
+                resolved and (resolved == p.name or resolved.endswith("." + p.name))
+            ):
+                self.result.plugin_var_to_class[var_name] = p.name
+                break
 
     def _check_call_assignment(
         self,
@@ -384,15 +771,20 @@ class _FileVisitor(ast.NodeVisitor):
             )
             rh = _get_call_keyword(call, "route_handlers")
             if rh is not None:
-                app.route_handler_names = _extract_list_names(rh)
+                app.route_handler_names = _extract_list_names(self._resolve(rh))
             elif call.args:
-                app.route_handler_names = _extract_list_names(call.args[0])
+                app.route_handler_names = _extract_list_names(
+                    self._resolve(call.args[0])
+                )
             guards_kw = _get_call_keyword(call, "guards")
             if guards_kw is not None:
-                app.guards = _extract_guard_names(guards_kw)
+                app.guards = _extract_guard_names(self._resolve(guards_kw))
             deps_kw = _get_call_keyword(call, "dependencies")
             if deps_kw is not None:
-                app.dependencies = _extract_dict_dependencies(deps_kw)
+                app.dependencies = _extract_dict_dependencies(self._resolve(deps_kw))
+            plugins_kw = _get_call_keyword(call, "plugins")
+            if plugins_kw is not None:
+                app.plugin_names = _extract_plugin_names(self._resolve(plugins_kw))
             self.result.apps.append(app)
 
         elif func_name == "Router" or resolved.endswith("Router"):
@@ -410,13 +802,13 @@ class _FileVisitor(ast.NodeVisitor):
                 router.path = _get_string_value(path_kw) or router.path
             rh = _get_call_keyword(call, "route_handlers")
             if rh is not None:
-                router.route_handler_names = _extract_list_names(rh)
+                router.route_handler_names = _extract_list_names(self._resolve(rh))
             guards_kw = _get_call_keyword(call, "guards")
             if guards_kw is not None:
-                router.guards = _extract_guard_names(guards_kw)
+                router.guards = _extract_guard_names(self._resolve(guards_kw))
             deps_kw = _get_call_keyword(call, "dependencies")
             if deps_kw is not None:
-                router.dependencies = _extract_dict_dependencies(deps_kw)
+                router.dependencies = _extract_dict_dependencies(self._resolve(deps_kw))
             self.result.routers.append(router)
 
 
@@ -435,6 +827,7 @@ def parse_file(source: str, uri: str) -> FileParseResult:
     except SyntaxError:
         return FileParseResult(uri=uri)
 
-    visitor = _FileVisitor(uri, {})
+    name_bindings = _collect_module_level_bindings(tree)
+    visitor = _FileVisitor(uri, {}, name_bindings)
     visitor.visit(tree)
     return visitor.result

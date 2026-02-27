@@ -45,6 +45,9 @@ async function createServer(
     // Set notification type
     newEnv.LS_SHOW_NOTIFICATION = settings.showNotifications;
 
+    // Suppress SyntaxWarnings from dependencies (e.g. invalid escape sequences in regex)
+    newEnv.PYTHONWARNINGS = 'ignore::SyntaxWarning';
+
     const args =
         newEnv.USE_DEBUGPY === 'False' || !isDebugScript
             ? settings.interpreter.slice(1).concat([SERVER_SCRIPT_PATH])

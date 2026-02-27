@@ -11,6 +11,7 @@ from route_parser import (
     ControllerInfo,
     FileParseResult,
     HandlerInfo,
+    PluginInfo,
     RouterInfo,
     parse_file,
 )
@@ -140,6 +141,8 @@ class WorkspaceIndex:
         name_to_controller: dict[str, ControllerInfo] = {}
         name_to_router: dict[str, RouterInfo] = {}
         name_to_handler: dict[str, HandlerInfo] = {}
+        name_to_plugin: dict[str, PluginInfo] = {}
+        var_name_to_plugin: dict[str, PluginInfo] = {}
 
         for result in self._file_results.values():
             for ctrl in result.controllers:
@@ -148,6 +151,21 @@ class WorkspaceIndex:
                 name_to_router[router.variable_name] = router
             for handler in result.handlers:
                 name_to_handler[handler.name] = handler
+            for plugin in result.plugins:
+                name_to_plugin[plugin.name] = plugin
+            for var_name, class_name in result.plugin_var_to_class.items():
+                if class_name in name_to_plugin:
+                    var_name_to_plugin[var_name] = name_to_plugin[class_name]
+            for var_name, callee in result.call_assignments:
+                if var_name in var_name_to_plugin:
+                    continue
+                resolved = result.imports.get(callee, callee)
+                class_name = resolved.split(".")[-1] if "." in resolved else resolved
+                if class_name in name_to_plugin:
+                    var_name_to_plugin[var_name] = name_to_plugin[class_name]
+
+        def resolve_plugin(name: str) -> PluginInfo | None:
+            return name_to_plugin.get(name) or var_name_to_plugin.get(name)
 
         apps = self.get_all_apps()
         if not apps:
@@ -174,6 +192,71 @@ class WorkspaceIndex:
                 )
                 if child:
                     app_node.children.append(child)
+            for plugin_name in app.plugin_names:
+                plugin_info = resolve_plugin(plugin_name)
+                if plugin_info is not None:
+                    plugin_node = RouteTreeNode(
+                        kind="plugin",
+                        label=plugin_info.name,
+                        path="/",
+                        full_path="/",
+                        line=plugin_info.line,
+                        end_line=plugin_info.end_line,
+                        uri=plugin_info.uri,
+                        dependencies=plugin_info.dependencies,
+                    )
+                    for name in plugin_info.route_handler_names:
+                        child = self._resolve_route_handler(
+                            name,
+                            "/",
+                            name_to_controller,
+                            name_to_router,
+                            name_to_handler,
+                        )
+                        if child:
+                            plugin_node.children.append(child)
+                    for nested_name in plugin_info.nested_plugin_names:
+                        nested_info = resolve_plugin(nested_name)
+                        if nested_info is not None:
+                            nested_node = RouteTreeNode(
+                                kind="plugin",
+                                label=nested_info.name,
+                                path="/",
+                                full_path="/",
+                                line=nested_info.line,
+                                end_line=nested_info.end_line,
+                                uri=nested_info.uri,
+                                dependencies=nested_info.dependencies,
+                            )
+                            for name in nested_info.route_handler_names:
+                                child = self._resolve_route_handler(
+                                    name,
+                                    "/",
+                                    name_to_controller,
+                                    name_to_router,
+                                    name_to_handler,
+                                )
+                                if child:
+                                    nested_node.children.append(child)
+                            plugin_node.children.append(nested_node)
+                        else:
+                            nested_node = RouteTreeNode(
+                                kind="plugin",
+                                label=nested_name,
+                                path="/",
+                                full_path="/",
+                            )
+                            plugin_node.children.append(nested_node)
+                    app_node.children.append(plugin_node)
+                else:
+                    # Third-party or external plugin (not parsed in workspace): show as placeholder
+                    plugin_node = RouteTreeNode(
+                        kind="plugin",
+                        label=plugin_name,
+                        path="/",
+                        full_path="/",
+                    )
+                    app_node.children.append(plugin_node)
             tree.append(app_node)
         return tree
 
@@ -261,22 +344,65 @@ class WorkspaceIndex:
             uri=handler.uri,
         )
 
+    def _collect_referenced_names_from_routers(
+        self,
+        routers: dict[str, RouterInfo],
+        controllers: dict[str, ControllerInfo],
+        handlers: dict[str, HandlerInfo],
+    ) -> tuple[set[str], set[str]]:
+        """Return (referenced_controller_names, referenced_handler_names) reachable from any router.
+
+        Uses a visited set on router names to avoid infinite recursion on cyclic router graphs.
+        """
+        referenced_controllers: set[str] = set()
+        referenced_handlers: set[str] = set()
+        visited_routers: set[str] = set()
+
+        def collect(router_name: str) -> None:
+            if router_name in visited_routers:
+                return
+            if router_name not in routers:
+                return
+            visited_routers.add(router_name)
+            router = routers[router_name]
+            for name in router.route_handler_names:
+                if name in routers:
+                    collect(name)
+                elif name in controllers:
+                    referenced_controllers.add(name)
+                elif name in handlers:
+                    referenced_handlers.add(name)
+
+        for rname in routers:
+            collect(rname)
+        return referenced_controllers, referenced_handlers
+
     def _build_flat_tree(
         self,
         handlers: dict[str, HandlerInfo],
         controllers: dict[str, ControllerInfo],
         routers: dict[str, RouterInfo],
     ) -> list[RouteTreeNode]:
-        """Fallback: when no App is found, show a flat list."""
+        """Fallback: when no App is found, show a flat list.
+
+        Router subtrees are shown in full. Top-level controllers and standalone handlers
+        are only added if they are not already referenced from any router (directly or
+        via nested routers), to avoid duplicate entries.
+        """
         nodes: list[RouteTreeNode] = []
         for router in routers.values():
             nodes.append(
                 self._build_router_node(router, "/", controllers, routers, handlers)
             )
+        ref_controllers, ref_handlers = self._collect_referenced_names_from_routers(
+            routers, controllers, handlers
+        )
         for ctrl in controllers.values():
-            nodes.append(self._build_controller_node(ctrl, "/"))
+            if ctrl.name not in ref_controllers:
+                nodes.append(self._build_controller_node(ctrl, "/"))
         for handler in handlers.values():
-            nodes.append(self._build_handler_node(handler, "/"))
+            if handler.name not in ref_handlers:
+                nodes.append(self._build_handler_node(handler, "/"))
         return nodes
 
     def build_resolved_routes(self) -> list[ResolvedRoute]:

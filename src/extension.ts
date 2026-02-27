@@ -154,6 +154,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         }),
     );
 
+    // Remove deleted/renamed Python files from the server index to avoid ghost routes
+    const pyWatcher = vscode.workspace.createFileSystemWatcher('**/*.py');
+    context.subscriptions.push(pyWatcher);
+    pyWatcher.onDidDelete(async (uri) => {
+        if (lsClient && lsClient.state === 2) {
+            try {
+                await lsClient.sendRequest('litestar/removeFile', { uri: uri.toString() });
+                setTimeout(() => routeTreeProvider.refresh(), 300);
+            } catch {
+                // Server may have shut down
+            }
+        }
+    });
+
     setImmediate(async () => {
         const interpreter = getInterpreterFromSetting(serverId);
         if (interpreter === undefined || interpreter.length === 0) {

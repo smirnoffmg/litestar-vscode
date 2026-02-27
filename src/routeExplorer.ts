@@ -28,6 +28,11 @@ const KIND_ICONS: Record<string, vscode.ThemeIcon> = {
     app: new vscode.ThemeIcon('server'),
     router: new vscode.ThemeIcon('git-merge'),
     controller: new vscode.ThemeIcon('symbol-class'),
+    plugin: new vscode.ThemeIcon('extensions'),
+    dependenciesGroup: new vscode.ThemeIcon('symbol-namespace'),
+    guardsGroup: new vscode.ThemeIcon('shield'),
+    dependency: new vscode.ThemeIcon('symbol-variable'),
+    guard: new vscode.ThemeIcon('symbol-method'),
 };
 
 class RouteTreeItem extends vscode.TreeItem {
@@ -38,6 +43,7 @@ class RouteTreeItem extends vscode.TreeItem {
         super(RouteTreeItem.buildLabel(data), collapsibleState);
 
         this.tooltip = RouteTreeItem.buildTooltip(data);
+        this.description = RouteTreeItem.buildDescription(data);
         this.iconPath = RouteTreeItem.pickIcon(data);
         this.contextValue = data.kind;
 
@@ -73,6 +79,23 @@ class RouteTreeItem extends vscode.TreeItem {
         return data.label;
     }
 
+    private static buildDescription(data: RouteTreeData): string | undefined {
+        const parts: string[] = [];
+        const depEntries =
+            data.dependencies && Object.keys(data.dependencies).length > 0
+                ? Object.entries(data.dependencies)
+                      .map(([k, v]) => `${k} → ${v}`)
+                      .join(', ')
+                : '';
+        if (depEntries) {
+            parts.push(`Dependencies: ${depEntries}`);
+        }
+        if (data.guards?.length) {
+            parts.push(`Guards: ${data.guards.join(', ')}`);
+        }
+        return parts.length ? parts.join('  ·  ') : undefined;
+    }
+
     private static buildTooltip(data: RouteTreeData): string {
         const parts: string[] = [];
         if (data.kind === 'handler') {
@@ -98,7 +121,7 @@ class RouteTreeItem extends vscode.TreeItem {
         if (data.kind === 'handler' && data.httpMethods.length > 0) {
             return METHOD_ICONS[data.httpMethods[0]] ?? new vscode.ThemeIcon('symbol-method');
         }
-        return KIND_ICONS[data.kind];
+        return KIND_ICONS[data.kind] ?? new vscode.ThemeIcon('symbol-misc');
     }
 }
 
@@ -120,7 +143,7 @@ export class RouteTreeProvider implements vscode.TreeDataProvider<RouteTreeItem>
             return;
         }
         try {
-            const data = await this._client.sendRequest<RouteTreeData[]>('litestar/routes');
+            const data = await this._client.sendRequest<RouteTreeData[]>('litestar/routes', {});
             this._treeData = data ?? [];
         } catch {
             this._treeData = [];
@@ -133,14 +156,38 @@ export class RouteTreeProvider implements vscode.TreeDataProvider<RouteTreeItem>
     }
 
     getChildren(element?: RouteTreeItem): RouteTreeItem[] {
-        const items = element ? element.data.children : this._treeData;
-        return items.map((item) => {
-            const hasChildren = item.children && item.children.length > 0;
-            return new RouteTreeItem(
-                item,
-                hasChildren ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.None,
-            );
-        });
+        if (!element) {
+            return this._treeData.map((item) => this.toTreeItem(item));
+        }
+
+        const data = element.data;
+        const routeChildren = (data.children || []).map((item) => this.toTreeItem(item));
+        return routeChildren;
+    }
+
+    private emptyNode(): RouteTreeData {
+        return {
+            kind: '',
+            label: '',
+            path: '',
+            fullPath: '',
+            httpMethods: [],
+            line: 0,
+            endLine: 0,
+            uri: '',
+            children: [],
+            guards: [],
+            dependencies: {},
+        };
+    }
+
+    private toTreeItem(item: RouteTreeData, forceState?: vscode.TreeItemCollapsibleState): RouteTreeItem {
+        const hasChildren =
+            item.children.length > 0 || item.kind === 'dependenciesGroup' || item.kind === 'guardsGroup';
+        const state =
+            forceState ??
+            (hasChildren ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.None);
+        return new RouteTreeItem(item, state);
     }
 
     getRawData(): RouteTreeData[] {

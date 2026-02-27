@@ -1,0 +1,88 @@
+name: Build VS Code Extension
+
+on:
+    push:
+        branches: [main, develop]
+    pull_request:
+        branches: [main, develop]
+    workflow_dispatch:
+
+jobs:
+    build:
+        name: Build extension
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            - name: Setup Node.js
+              uses: actions/setup-node@v4
+              with:
+                  node-version: '20'
+                  cache: 'npm'
+
+            - name: Setup Python
+              uses: actions/setup-python@v5
+              with:
+                  python-version: '3.12'
+
+            - name: Install dependencies
+              run: npm ci
+
+            - name: Install Python bundle (lsprotocol, pygls, etc.)
+              run: |
+                  pip install -t ./bundled/libs --no-cache-dir --implementation py --no-deps --upgrade -r ./requirements.txt
+
+            - name: Lint
+              run: npm run lint
+
+            - name: Build extension
+              run: npm run package
+
+            - name: Set develop version
+              if: github.ref == 'refs/heads/develop'
+              run: |
+                  SHORT_SHA="${GITHUB_SHA::7}"
+                  echo "SHORT_SHA=${SHORT_SHA}" >> "$GITHUB_ENV"
+                  VERSION=$(node -p "require('./package.json').version")
+                  npm version --no-git-tag-version "${VERSION}-develop.${SHORT_SHA}"
+
+            - name: Package VSIX
+              run: |
+                  BASE_URL="${{ github.server_url }}/${{ github.repository }}"
+                  BASE_IMAGES_URL="${BASE_URL}/raw/${{ github.ref_name }}"
+                  npx @vscode/vsce package -o litestar.vsix --no-dependencies \
+                      --baseContentUrl "${BASE_URL}" --baseImagesUrl "${BASE_IMAGES_URL}"
+
+            - name: Upload VSIX artifact
+              uses: actions/upload-artifact@v4
+              with:
+                  name: litestar-vsix-${{ github.ref == 'refs/heads/develop' && 'develop' || 'release' }}
+                  path: litestar.vsix
+
+    release-develop:
+        name: Publish develop to Releases
+        needs: [build]
+        if: github.ref == 'refs/heads/develop' && github.event_name == 'push'
+        runs-on: ubuntu-latest
+        permissions:
+            contents: write
+        steps:
+            - name: Get short SHA
+              run: echo "SHORT_SHA=${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+
+            - name: Download VSIX artifact
+              uses: actions/download-artifact@v4
+              with:
+                  name: litestar-vsix-develop
+
+            - name: Create Release and upload VSIX
+              uses: softprops/action-gh-release@v2
+              with:
+                  tag_name: develop-${{ env.SHORT_SHA }}
+                  name: Develop (${{ env.SHORT_SHA }})
+                  files: litestar.vsix
+                  prerelease: true
+                  generate_release_notes: true
+              env:
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

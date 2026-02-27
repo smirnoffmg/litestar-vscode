@@ -110,6 +110,50 @@ app = Litestar(
     assert app.guards == ["auth_guard"]
 
 
+def test_parse_factory_litestar():
+    """Factory pattern: def create_app() -> Litestar: return Litestar(...) is detected as an app."""
+    source = """
+from litestar import Litestar, get
+
+@get("/health")
+async def health_check() -> dict:
+    return {"ok": True}
+
+
+def create_app() -> Litestar:
+    return Litestar(route_handlers=[health_check])
+"""
+    result = parse_file(source, "file:///test.py")
+    assert len(result.apps) == 1
+    app = result.apps[0]
+    assert app.variable_name == "create_app"
+    assert app.route_handler_names == ["health_check"]
+
+
+def test_parse_factory_litestar_with_plugins():
+    """Factory app with plugins= is parsed; plugin_names and route_handlers are extracted."""
+    source = """
+from litestar import Litestar, get
+
+@get("/ping")
+async def ping() -> dict:
+    return {"pong": True}
+
+
+def create_app() -> Litestar:
+    return Litestar(
+        route_handlers=[ping],
+        plugins=[SomePlugin()],
+    )
+"""
+    result = parse_file(source, "file:///test.py")
+    assert len(result.apps) == 1
+    app = result.apps[0]
+    assert app.variable_name == "create_app"
+    assert app.route_handler_names == ["ping"]
+    assert app.plugin_names == ["SomePlugin"]
+
+
 def test_parse_missing_return_type():
     source = """
 from litestar import get
@@ -183,3 +227,63 @@ async def get_item(item_id: int) -> dict:
 """
     result = parse_file(source, "file:///test.py")
     assert result.handlers[0].path == "/items/{item_id:int}"
+
+
+def test_parse_app_with_variable_dependencies_and_plugins():
+    """Litestar(dependencies=app_dependencies, plugins=plugins) resolves variables to actual dict/list."""
+    source = """
+from litestar import Litestar
+from litestar.di import Provide
+
+app_dependencies = {
+    "auth_config": Provide(provide_auth_config),
+    "filin_client": Provide(provide_filin_client),
+}
+plugins = [SentryPlugin(), CorsarPlugin(), PydanticPlugin(prefer_alias=True)]
+
+app = Litestar(
+    dependencies=app_dependencies,
+    plugins=plugins,
+    route_handlers=[router],
+)
+"""
+    result = parse_file(source, "file:///test.py")
+    assert len(result.apps) == 1
+    app = result.apps[0]
+    assert app.variable_name == "app"
+    assert app.dependencies == {
+        "auth_config": "provide_auth_config",
+        "filin_client": "provide_filin_client",
+    }
+    assert app.plugin_names == ["SentryPlugin", "CorsarPlugin", "PydanticPlugin"]
+    assert app.route_handler_names == ["router"]
+
+
+def test_parse_factory_app_with_local_dependencies_and_plugins():
+    """create_app() that defines app_dependencies and plugins locally and returns Litestar(...) resolves them."""
+    source = """
+from litestar import Litestar
+from litestar.di import Provide
+
+def create_app() -> Litestar:
+    app_dependencies = {
+        "auth_config": Provide(dependencies.provide_auth_config),
+        "filin_client": Provide(dependencies.provide_filin_client),
+    }
+    plugins = [SentryPlugin(), CorsarPlugin(), PydanticPlugin(prefer_alias=True)]
+    return Litestar(
+        dependencies=app_dependencies,
+        plugins=plugins,
+        route_handlers=[router],
+    )
+"""
+    result = parse_file(source, "file:///test.py")
+    assert len(result.apps) == 1
+    app = result.apps[0]
+    assert app.variable_name == "create_app"
+    assert app.dependencies == {
+        "auth_config": "provide_auth_config",
+        "filin_client": "provide_filin_client",
+    }
+    assert app.plugin_names == ["SentryPlugin", "CorsarPlugin", "PydanticPlugin"]
+    assert app.route_handler_names == ["router"]

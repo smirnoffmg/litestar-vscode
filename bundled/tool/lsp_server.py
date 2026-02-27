@@ -39,16 +39,15 @@ import lsp_utils as utils
 import lsprotocol.types as lsp
 import route_parser
 import workspace_index as ws_index
-from pygls import server, uris, workspace
+from pygls import uris, workspace
+from pygls.lsp.server import LanguageServer
 
 WORKSPACE_SETTINGS = {}
 GLOBAL_SETTINGS = {}
 RUNNER = pathlib.Path(__file__).parent / "lsp_runner.py"
 
 MAX_WORKERS = 5
-LSP_SERVER = server.LanguageServer(
-    name="Litestar", version="0.1.0", max_workers=MAX_WORKERS
-)
+LSP_SERVER = LanguageServer(name="Litestar", version="0.1.0", max_workers=MAX_WORKERS)
 
 TOOL_MODULE = "litestar"
 TOOL_DISPLAY = "Litestar"
@@ -64,25 +63,27 @@ INDEX = ws_index.WorkspaceIndex()
 @LSP_SERVER.feature(lsp.TEXT_DOCUMENT_DID_OPEN)
 def did_open(params: lsp.DidOpenTextDocumentParams) -> None:
     """LSP handler for textDocument/didOpen request."""
-    document = LSP_SERVER.workspace.get_document(params.text_document.uri)
+    document = LSP_SERVER.workspace.get_text_document(params.text_document.uri)
     _reparse_and_diagnose(document)
 
 
 @LSP_SERVER.feature(lsp.TEXT_DOCUMENT_DID_SAVE)
 def did_save(params: lsp.DidSaveTextDocumentParams) -> None:
     """LSP handler for textDocument/didSave request."""
-    document = LSP_SERVER.workspace.get_document(params.text_document.uri)
+    document = LSP_SERVER.workspace.get_text_document(params.text_document.uri)
     _reparse_and_diagnose(document)
 
 
 @LSP_SERVER.feature(lsp.TEXT_DOCUMENT_DID_CLOSE)
 def did_close(params: lsp.DidCloseTextDocumentParams) -> None:
     """LSP handler for textDocument/didClose request."""
-    document = LSP_SERVER.workspace.get_document(params.text_document.uri)
-    LSP_SERVER.publish_diagnostics(document.uri, [])
+    document = LSP_SERVER.workspace.get_text_document(params.text_document.uri)
+    LSP_SERVER.text_document_publish_diagnostics(
+        lsp.PublishDiagnosticsParams(uri=document.uri, diagnostics=[])
+    )
 
 
-def _reparse_and_diagnose(document: workspace.Document) -> None:
+def _reparse_and_diagnose(document: workspace.TextDocument) -> None:
     """Re-parse a document, update the workspace index, and publish diagnostics."""
     if str(document.uri).startswith("vscode-notebook-cell"):
         return
@@ -98,7 +99,9 @@ def _reparse_and_diagnose(document: workspace.Document) -> None:
     if diag_enabled:
         diags = litestar_diagnostics.compute_diagnostics(result, workspace_index=INDEX)
 
-    LSP_SERVER.publish_diagnostics(document.uri, diags)
+    LSP_SERVER.text_document_publish_diagnostics(
+        lsp.PublishDiagnosticsParams(uri=document.uri, diagnostics=diags)
+    )
 
 
 # **********************************************************
@@ -109,7 +112,7 @@ def _reparse_and_diagnose(document: workspace.Document) -> None:
 @LSP_SERVER.feature(lsp.TEXT_DOCUMENT_CODE_LENS)
 def code_lens(params: lsp.CodeLensParams) -> list[lsp.CodeLens] | None:
     """LSP handler for textDocument/codeLens request."""
-    document = LSP_SERVER.workspace.get_document(params.text_document.uri)
+    document = LSP_SERVER.workspace.get_text_document(params.text_document.uri)
     settings = _get_settings_by_document(document)
     if not settings.get("codeLensEnabled", True):
         return None
@@ -117,7 +120,7 @@ def code_lens(params: lsp.CodeLensParams) -> list[lsp.CodeLens] | None:
     return _build_code_lens(document)
 
 
-def _build_code_lens(document: workspace.Document) -> list[lsp.CodeLens]:
+def _build_code_lens(document: workspace.TextDocument) -> list[lsp.CodeLens]:
     """Build CodeLens items for test client calls in the document."""
     import ast
 
@@ -213,7 +216,7 @@ def _find_matching_route(
 @LSP_SERVER.feature(lsp.TEXT_DOCUMENT_HOVER)
 def hover(params: lsp.HoverParams) -> lsp.Hover | None:
     """LSP handler for textDocument/hover — show resolved route info."""
-    document = LSP_SERVER.workspace.get_document(params.text_document.uri)
+    document = LSP_SERVER.workspace.get_text_document(params.text_document.uri)
     position = params.position
 
     file_result = INDEX.get_file_result(document.uri)
@@ -336,6 +339,14 @@ def get_routes(params: Any = None) -> list[dict]:
     return ws_index.route_tree_to_dict(tree)
 
 
+@LSP_SERVER.feature("litestar/removeFile")
+def remove_file(params: dict) -> None:
+    """Custom LSP method: remove a file from the workspace index (e.g. after delete/rename)."""
+    uri = params.get("uri")
+    if isinstance(uri, str):
+        INDEX.remove_file(uri)
+
+
 @LSP_SERVER.feature("litestar/dependencies")
 def get_dependencies(params: dict) -> list[dict]:
     """Custom LSP method: return the dependency chain for a handler."""
@@ -414,7 +425,7 @@ def on_shutdown(_params: Optional[Any] = None) -> None:
     jsonrpc.shutdown_json_rpc()
 
 
-def get_cwd(settings: dict, document: Optional[workspace.Document]) -> str:
+def get_cwd(settings: dict, document: Optional[workspace.TextDocument]) -> str:
     """Returns the working directory for running the tool.
 
     Resolves VS Code file-related variable substitutions when a document
@@ -494,7 +505,7 @@ def _get_settings_by_path(file_path: pathlib.Path):
     return setting_values[0]
 
 
-def _get_document_key(document: workspace.Document):
+def _get_document_key(document: workspace.TextDocument):
     if WORKSPACE_SETTINGS:
         document_workspace = pathlib.Path(document.path)
         workspaces = {s["workspaceFS"] for s in WORKSPACE_SETTINGS.values()}
@@ -507,7 +518,7 @@ def _get_document_key(document: workspace.Document):
     return None
 
 
-def _get_settings_by_document(document: workspace.Document | None):
+def _get_settings_by_document(document: workspace.TextDocument | None):
     if document is None or document.path is None:
         return list(WORKSPACE_SETTINGS.values())[0]
 
@@ -530,25 +541,37 @@ def _get_settings_by_document(document: workspace.Document | None):
 def log_to_output(
     message: str, msg_type: lsp.MessageType = lsp.MessageType.Log
 ) -> None:
-    LSP_SERVER.show_message_log(message, msg_type)
+    LSP_SERVER.window_log_message(lsp.LogMessageParams(type=msg_type, message=message))
 
 
 def log_error(message: str) -> None:
-    LSP_SERVER.show_message_log(message, lsp.MessageType.Error)
+    LSP_SERVER.window_log_message(
+        lsp.LogMessageParams(type=lsp.MessageType.Error, message=message)
+    )
     if os.getenv("LS_SHOW_NOTIFICATION", "off") in ["onError", "onWarning", "always"]:
-        LSP_SERVER.show_message(message, lsp.MessageType.Error)
+        LSP_SERVER.window_show_message(
+            lsp.ShowMessageParams(type=lsp.MessageType.Error, message=message)
+        )
 
 
 def log_warning(message: str) -> None:
-    LSP_SERVER.show_message_log(message, lsp.MessageType.Warning)
+    LSP_SERVER.window_log_message(
+        lsp.LogMessageParams(type=lsp.MessageType.Warning, message=message)
+    )
     if os.getenv("LS_SHOW_NOTIFICATION", "off") in ["onWarning", "always"]:
-        LSP_SERVER.show_message(message, lsp.MessageType.Warning)
+        LSP_SERVER.window_show_message(
+            lsp.ShowMessageParams(type=lsp.MessageType.Warning, message=message)
+        )
 
 
 def log_always(message: str) -> None:
-    LSP_SERVER.show_message_log(message, lsp.MessageType.Info)
+    LSP_SERVER.window_log_message(
+        lsp.LogMessageParams(type=lsp.MessageType.Info, message=message)
+    )
     if os.getenv("LS_SHOW_NOTIFICATION", "off") in ["always"]:
-        LSP_SERVER.show_message(message, lsp.MessageType.Info)
+        LSP_SERVER.window_show_message(
+            lsp.ShowMessageParams(type=lsp.MessageType.Info, message=message)
+        )
 
 
 # *****************************************************
