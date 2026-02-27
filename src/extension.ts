@@ -1,6 +1,3 @@
-// Copyright (c) Microsoft Corporation. All rights reserved.
-// Licensed under the MIT License.
-
 import * as vscode from 'vscode';
 import { LanguageClient } from 'vscode-languageclient/node';
 import { registerLogger, traceError, traceLog, traceVerbose } from './common/log/logging';
@@ -17,13 +14,15 @@ import { loadServerDefaults } from './common/setup';
 import { LS_SERVER_RESTART_DELAY } from './common/constants';
 import { getLSClientTraceLevel } from './common/utilities';
 import { createOutputChannel, onDidChangeConfiguration, registerCommand } from './common/vscodeapi';
+import { RouteTreeProvider } from './routeExplorer';
+import { searchRoutes } from './routeSearch';
 
 let lsClient: LanguageClient | undefined;
 let isRestarting = false;
 let restartTimer: NodeJS.Timeout | undefined;
+const routeTreeProvider = new RouteTreeProvider();
+
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
-    // This is required to get server name and module. This should be
-    // the first thing that we do in this extension.
     const serverInfo = loadServerDefaults();
     const serverName = serverInfo.name;
     const serverId = serverInfo.module;
@@ -46,10 +45,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         }),
     );
 
-    // Log Server information
     traceLog(`Name: ${serverInfo.name}`);
     traceLog(`Module: ${serverInfo.module}`);
     traceVerbose(`Full Server Info: ${JSON.stringify(serverInfo)}`);
+
+    // Register Route Explorer tree view
+    const treeView = vscode.window.createTreeView('litestarRoutes', {
+        treeDataProvider: routeTreeProvider,
+        showCollapseAll: true,
+    });
+    context.subscriptions.push(treeView);
 
     const runServer = async () => {
         if (isRestarting) {
@@ -70,6 +75,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                     }
                     lsClient = undefined;
                 }
+                routeTreeProvider.setClient(undefined);
                 return;
             }
 
@@ -79,22 +85,26 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                     traceVerbose(`Using interpreter from ${serverInfo.module}.interpreter: ${interpreter.join(' ')}`);
                     lsClient = await restartServer(serverId, serverName, outputChannel, lsClient);
                 }
-                return;
+            } else {
+                const interpreterDetails = await getInterpreterDetails();
+                if (interpreterDetails.path) {
+                    traceVerbose(`Using interpreter from Python extension: ${interpreterDetails.path.join(' ')}`);
+                    lsClient = await restartServer(serverId, serverName, outputChannel, lsClient);
+                } else {
+                    traceError(
+                        'Python interpreter missing:\r\n' +
+                            '[Option 1] Select python interpreter using the ms-python.python.\r\n' +
+                            `[Option 2] Set an interpreter using "${serverId}.interpreter" setting.\r\n` +
+                            'Please use Python 3.9 or greater.',
+                    );
+                }
             }
 
-            const interpreterDetails = await getInterpreterDetails();
-            if (interpreterDetails.path) {
-                traceVerbose(`Using interpreter from Python extension: ${interpreterDetails.path.join(' ')}`);
-                lsClient = await restartServer(serverId, serverName, outputChannel, lsClient);
-                return;
+            routeTreeProvider.setClient(lsClient);
+            if (lsClient) {
+                // Refresh routes once the server is running
+                setTimeout(() => routeTreeProvider.refresh(), 1500);
             }
-
-            traceError(
-                'Python interpreter missing:\r\n' +
-                    '[Option 1] Select python interpreter using the ms-python.python.\r\n' +
-                    `[Option 2] Set an interpreter using "${serverId}.interpreter" setting.\r\n` +
-                    'Please use Python 3.8 or greater.',
-            );
         } finally {
             isRestarting = false;
         }
@@ -111,6 +121,36 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         }),
         registerCommand(`${serverId}.restart`, async () => {
             await runServer();
+        }),
+        registerCommand('litestar.showRoutes', async () => {
+            try {
+                await vscode.commands.executeCommand('litestar.focus');
+            } catch {
+                // View may not be visible yet
+            }
+        }),
+        registerCommand('litestar.searchRoutes', async () => {
+            await searchRoutes(routeTreeProvider);
+        }),
+        registerCommand('litestar.refreshRoutes', async () => {
+            await routeTreeProvider.refresh();
+        }),
+        registerCommand('litestar.goToHandler', async (uri: string, line: number) => {
+            const fileUri = vscode.Uri.parse(uri);
+            const doc = await vscode.workspace.openTextDocument(fileUri);
+            await vscode.window.showTextDocument(doc, {
+                selection: new vscode.Range(new vscode.Position(line - 1, 0), new vscode.Position(line - 1, 0)),
+            });
+        }),
+    );
+
+    // Refresh routes when files are saved
+    context.subscriptions.push(
+        vscode.workspace.onDidSaveTextDocument(async (doc) => {
+            if (doc.languageId === 'python') {
+                // Small delay to allow the server to process the change
+                setTimeout(() => routeTreeProvider.refresh(), 500);
+            }
         }),
     );
 

@@ -1,0 +1,136 @@
+{
+    "Litestar GET handler": {
+        "prefix": "ls-get",
+        "body": [
+            "from litestar import get",
+            "",
+            "",
+            "@get(\"${1:/path}\")",
+            "async def ${2:handler_name}(${3}) -> ${4:dict}:",
+            "    ${0:...}"
+        ],
+        "description": "Scaffold a @get() handler with type hints"
+    },
+    "Litestar POST handler": {
+        "prefix": "ls-post",
+        "body": [
+            "from litestar import post",
+            "",
+            "",
+            "@post(\"${1:/path}\")",
+            "async def ${2:handler_name}(${3:data: dict}) -> ${4:dict}:",
+            "    ${0:...}"
+        ],
+        "description": "Scaffold a @post() handler"
+    },
+    "Litestar PUT handler": {
+        "prefix": "ls-put",
+        "body": [
+            "from litestar import put",
+            "",
+            "",
+            "@put(\"${1:/path/{item_id:int}}\")",
+            "async def ${2:handler_name}(${3:item_id: int, data: dict}) -> ${4:dict}:",
+            "    ${0:...}"
+        ],
+        "description": "Scaffold a @put() handler"
+    },
+    "Litestar PATCH handler": {
+        "prefix": "ls-patch",
+        "body": [
+            "from litestar import patch",
+            "",
+            "",
+            "@patch(\"${1:/path/{item_id:int}}\")",
+            "async def ${2:handler_name}(${3:item_id: int, data: dict}) -> ${4:dict}:",
+            "    ${0:...}"
+        ],
+        "description": "Scaffold a @patch() handler"
+    },
+    "Litestar DELETE handler": {
+        "prefix": "ls-delete",
+        "body": [
+            "from litestar import delete",
+            "",
+            "",
+            "@delete(\"${1:/path/{item_id:int}}\")",
+            "async def ${2:handler_name}(${3:item_id: int}) -> ${4:None}:",
+            "    ${0:...}"
+        ],
+        "description": "Scaffold a @delete() handler"
+    },
+    "Litestar Controller": {
+        "prefix": "ls-controller",
+        "body": [
+            "from litestar import Controller, get, post",
+            "",
+            "",
+            "class ${1:MyController}(Controller):",
+            "    path = \"${2:/path}\"",
+            "",
+            "    @get()",
+            "    async def list_items(self) -> ${3:list[dict]}:",
+            "        ${4:...}",
+            "",
+            "    @post()",
+            "    async def create_item(self, data: ${5:dict}) -> ${6:dict}:",
+            "        ${0:...}"
+        ],
+        "description": "Scaffold a Controller class with path and methods"
+    },
+    "Litestar Router": {
+        "prefix": "ls-router",
+        "body": [
+            "from litestar import Router",
+            "",
+            "",
+            "${1:router} = Router(",
+            "    path=\"${2:/api}\",",
+            "    route_handlers=[${3}],",
+            "    dependencies={${4}},",
+            "    guards=[${5}],",
+            ")"
+        ],
+        "description": "Scaffold a Router with dependencies and guards"
+    },
+    "Litestar Guard": {
+        "prefix": "ls-guard",
+        "body": [
+            "from litestar.connection import ASGIConnection",
+            "from litestar.handlers import BaseRouteHandler",
+            "",
+            "",
+            "def ${1:guard_name}(connection: ASGIConnection, _: BaseRouteHandler) -> None:",
+            "    ${0:...}"
+        ],
+        "description": "Scaffold a guard function"
+    },
+    "Litestar Middleware": {
+        "prefix": "ls-middleware",
+        "body": [
+            "from litestar.middleware import AbstractMiddleware",
+            "from litestar.types import ASGIApp, Receive, Scope, Send",
+            "",
+            "",
+            "class ${1:MyMiddleware}(AbstractMiddleware):",
+            "    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:",
+            "        ${0:...}",
+            "        await self.app(scope, receive, send)"
+        ],
+        "description": "Scaffold an ASGI middleware"
+    },
+    "Litestar Test Client": {
+        "prefix": "ls-test",
+        "body": [
+            "from litestar.testing import create_test_client",
+            "",
+            "",
+            "def test_${1:handler}() -> None:",
+            "    with create_test_client(route_handlers=[${2:handler}]) as client:",
+            "        response = client.${3:get}(\"${4:/path}\")",
+            "        assert response.status_code == ${5:200}",
+            "        ${0}"
+        ],
+        "description": "Scaffold a test using create_test_client"
+    }
+}

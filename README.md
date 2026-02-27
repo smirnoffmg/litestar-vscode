@@ -1,158 +1,199 @@
-# Template for VS Code python tools extensions
+# Litestar for Visual Studio Code
 
-This is a template repository to get you started on building a VS Code extension for your favorite python tool. It could be a linter, formatter, or code analysis, or all of those together. This template will give you the basic building blocks you need to build a VS Code extension for it.
+A Visual Studio Code extension for [Litestar](https://litestar.dev/) framework development. Built on the Language Server Protocol with a Python backend for accurate static analysis.
 
-## Programming Languages and Frameworks
+[![Visual Studio Marketplace](https://img.shields.io/visual-studio-marketplace/v/litestar.litestar-vscode?label=VS%20Marketplace)](https://marketplace.visualstudio.com/items?itemName=litestar.litestar-vscode)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-The extension template has two parts, the extension part and language server part. The extension part is written in TypeScript, and language server part is written in Python over the [_pygls_][pygls] (Python language server) library.
+## Features
 
-For the most part you will be working on the python part of the code when using this template. You will be integrating your tool with the extension part using the [Language Server Protocol](https://microsoft.github.io/language-server-protocol). [_pygls_][pygls] currently works on the [version 3.16 of LSP](https://microsoft.github.io/language-server-protocol/specifications/specification-3-16/).
+### Route Explorer
 
-The TypeScript part handles working with VS Code and its UI. The extension template comes with few settings pre configured that can be used by your tool. If you need to add new settings to support your tool, you will have to work with a bit of TypeScript. The extension has examples for few settings that you can follow. You can also look at extensions developed by our team for some of the popular tools as reference.
+Hierarchical tree view of all routes in your Litestar application. Displays the full routing structure — `Litestar` app → `Router` → `Controller` → handler — with HTTP method, path, and handler type indicators. Click any route to jump directly to its definition.
+
+<!-- TODO: Add GIF/screenshot of Route Explorer -->
+
+### Route Search
+
+Quickly search across all routes by path, HTTP method, handler name, or controller using `Ctrl+Shift+E` (`Cmd+Shift+E` on Mac).
+
+<!-- TODO: Add GIF/screenshot of Route Search -->
+
+### CodeLens for Test Client
+
+CodeLens links appear above test client calls like `client.get("/items")` using Litestar's `TestClient` or `create_test_client`, letting you jump directly to the matching route handler definition.
+
+<!-- TODO: Add GIF/screenshot of CodeLens -->
+
+### Diagnostics
+
+Static analysis warnings for common Litestar issues:
+
+- Handler missing return type annotation
+- Sync handler without `sync_to_thread` parameter
+- Duplicate route paths
+- Guard function with incorrect signature
+- `Provide(...)` referencing a non-existent callable
+- Handler parameter not matching any path, query, or dependency source
+
+### Dependency Injection Visualization
+
+Hover over a handler to see its resolved dependency chain across all layers (app → router → controller → handler). Navigate from a handler parameter directly to its `Provide(...)` definition. Warnings for shadowed dependencies.
+
+<!-- TODO: Add GIF/screenshot of DI visualization -->
+
+### Guard Chain Visualization
+
+View the full cumulative guard chain that applies to any handler, aggregated across all layers of the application.
+
+### Snippets
+
+| Prefix          | Description                                         |
+| --------------- | --------------------------------------------------- |
+| `ls-get`        | Scaffold a `@get()` handler with type hints         |
+| `ls-post`       | Scaffold a `@post()` handler                        |
+| `ls-put`        | Scaffold a `@put()` handler                         |
+| `ls-patch`      | Scaffold a `@patch()` handler                       |
+| `ls-delete`     | Scaffold a `@delete()` handler                      |
+| `ls-controller` | Scaffold a `Controller` class with path and methods |
+| `ls-router`     | Scaffold a `Router` with dependencies and guards    |
+| `ls-guard`      | Scaffold a guard function                           |
+| `ls-middleware` | Scaffold an ASGI middleware                         |
+| `ls-test`       | Scaffold a test using `create_test_client`          |
 
 ## Requirements
 
-1. VS Code 1.64.0 or greater
-1. Python 3.9 or greater
-1. node >= 18.17.0
-1. npm >= 8.19.0 (`npm` is installed with node, check npm version, use `npm install -g npm@8.3.0` to update)
-1. Python extension for VS Code
+- VS Code 1.64.0 or greater
+- Python 3.9 or greater
+- [Python extension](https://marketplace.visualstudio.com/items?itemName=ms-python.python) for VS Code
 
-You should know to create and work with python virtual environments.
+## Settings
 
-## Getting Started
+| Setting                        | Description                                                                                                         | Default            |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------- | ------------------ |
+| `litestar.entryPoint`          | Entry point for the Litestar application in module notation (e.g., `my_app.main:app`). Auto-detected if not set.    | `""` (auto-detect) |
+| `litestar.args`                | Additional arguments passed to the Litestar language server.                                                        | `[]`               |
+| `litestar.path`                | Path to a custom Litestar tool binary.                                                                              | `[]`               |
+| `litestar.importStrategy`      | Defines how the extension finds the tool. `fromEnvironment` uses the Python environment, `useBundled` uses bundled. | `useBundled`       |
+| `litestar.interpreter`         | Path to the Python interpreter to use.                                                                              | `[]`               |
+| `litestar.codeLens.enabled`    | Show CodeLens links above test client calls.                                                                        | `true`             |
+| `litestar.diagnostics.enabled` | Enable static analysis diagnostics for Litestar-specific issues.                                                    | `true`             |
+| `litestar.showNotification`    | Controls when notifications are shown: `off`, `onError`, `onWarning`, `always`.                                     | `off`              |
 
-1. Use this [template to create your repo](https://docs.github.com/en/repositories/creating-and-managing-repositories/creating-a-repository-from-a-template).
-1. Check-out your repo locally on your development machine.
-1. Create and activate a python virtual environment for this project in a terminal. Be sure to use the minimum version of python for your tool. This template was written to work with python 3.9 or greater.
-1. Install `nox` in the activated environment: `python -m pip install nox`.
-1. Add your favorite tool to `requirements.in`
-1. Run `nox --session setup`.
-1. **Optional** Install test dependencies `python -m pip install -r src/test/python_tests/requirements.txt`. You will have to install these to run tests from the Test Explorer.
-1. Open `package.json`, look for and update the following things:
-    1. Find and replace `<pytool-module>` with module name for your tool. This will be used internally to create settings namespace, register commands, etc. Recommendation is to use lower case version of the name, no spaces, `-` are ok. For example, replacing `<pytool-module>` with `pylint` will lead to settings looking like `pylint.args`. Another example, replacing `<pytool-module>` with `black-formatter` will make settings look like `black-formatter.args`.
-    1. Find and replace `<pytool-display-name>` with display name for your tool. This is used as the title for the extension in market place, extensions view, output logs, etc. For example, for the `black` extension this is `Black Formatter`.
-1. Install node packages using `npm install`.
-1. Go to https://marketplace.visualstudio.com/vscode and create a publisher account if you don't already have one.
-    1. Use the published name in `package.json` by replacing `<my-publisher>` with the name you registered in the marketplace.
+The extension automatically discovers your Litestar app by scanning for files that instantiate `Litestar(...)`. If auto-detection doesn't work for your project structure, specify an entrypoint via the `litestar.entryPoint` setting or `[tool.litestar]` in `pyproject.toml`.
 
-## Features of this Template
+## Commands
 
-After finishing the getting started part, this template would have added the following. Assume `<pytool-module>` was replaced with `mytool`, and `<pytool-display-name>` with`My Tool`:
+| Command                    | Description                       |
+| -------------------------- | --------------------------------- |
+| `Litestar: Restart Server` | Restart the language server       |
+| `Litestar: Show Routes`    | Open the Route Explorer panel     |
+| `Litestar: Search Routes`  | Search routes via Command Palette |
 
-1. A command `My Tool: Restart Server` (command Id: `mytool.restart`).
-1. Following setting:
-    - `mytool.args`
-    - `mytool.path`
-    - `mytool.importStrategy`
-    - `mytool.interpreter`
-    - `mytool.showNotification`
-1. Following triggers for extension activation:
-    - On Language `python`.
-    - On File with `.py` extension found in the opened workspace.
-1. Following commands are registered:
-    - `mytool.restart`: Restarts the language server.
-1. Output Channel for logging `Output` > `My Tool`
+## Architecture
 
-## Adding features from your tool
+The extension has two parts:
 
-Open `bundled/tool/lsp_server.py`, here is where you will do most of the changes. Look for `TODO` comments there for more details.
+- **TypeScript** — handles VS Code integration: tree views, CodeLens UI, commands, status bar, settings management
+- **Python** — language server built on [pygls](https://github.com/openlawlibrary/pygls) that performs AST-based static analysis of Litestar applications: route discovery, dependency resolution, guard chain analysis, and diagnostics
 
-Also look for `TODO` in other locations in the entire template:
+Communication between the two happens over the [Language Server Protocol](https://microsoft.github.io/language-server-protocol).
 
-- `bundled/tool/lsp_runner.py` : You may need to update this in some special cases.
-- `src/test/python_tests/test_server.py` : This is where you will write tests. There are two incomplete examples provided there to get you started.
-- All the markdown files in this template have some `TODO` items, be sure to check them out as well. That includes updating the LICENSE file, even if you want to keep it MIT License.
+## Development
 
-References, to other extension created by our team using the template:
+### Prerequisites
 
-- Protocol reference: <https://microsoft.github.io/language-server-protocol/specifications/specification-3-16/>
-- Implementation showing how to handle Linting on file `open`, `save`, and `close`. [Pylint](https://github.com/microsoft/vscode-pylint/tree/main/bundled/tool)
-- Implementation showing how to handle Formatting. [Black Formatter](https://github.com/microsoft/vscode-black-formatter/tree/main/bundled/tool)
-- Implementation showing how to handle Code Actions. [isort](https://github.com/microsoft/vscode-isort/blob/main/bundled/tool)
+- Python 3.9+
+- Node.js >= 18.17.0
+- npm >= 8.19.0
 
-## Building and Run the extension
+### Setup
 
-Run the `Debug Extension and Python` configuration form VS Code. That should build and debug the extension in host window.
+```bash
+git clone https://github.com/<your-username>/litestar-vscode.git
+cd litestar-vscode
+python -m venv .venv
+source .venv/bin/activate  # or .venv\Scripts\activate on Windows
+pip install nox
+nox --session setup
+npm install
+```
 
-Note: if you just want to build you can run the build task in VS Code (`ctrl`+`shift`+`B`)
+### Build and Run
 
-## Debugging
+Run the `Debug Extension and Python` launch configuration in VS Code (`F5`). This builds and launches the extension in a new Extension Development Host window.
 
-To debug both TypeScript and Python code use `Debug Extension and Python` debug config. This is the recommended way. Also, when stopping, be sure to stop both the Typescript, and Python debug sessions. Otherwise, it may not reconnect to the python session.
+To build without debugging: `Ctrl+Shift+B`.
 
-To debug only TypeScript code, use `Debug Extension` debug config.
+### Debugging
 
-To debug a already running server or in production server, use `Python Attach`, and select the process that is running `lsp_server.py`.
+| Configuration                | Use case                                       |
+| ---------------------------- | ---------------------------------------------- |
+| `Debug Extension and Python` | Debug both TypeScript and Python (recommended) |
+| `Debug Extension`            | Debug TypeScript only                          |
+| `Python Attach`              | Attach to a running `lsp_server.py` process    |
 
-## Logging and Logs
+When stopping a combined debug session, stop both the TypeScript and Python sessions to ensure clean reconnection.
 
-The template creates a logging Output channel that can be found under `Output` > `mytool` panel. You can control the log level running the `Developer: Set Log Level...` command from the Command Palette, and selecting your extension from the list. It should be listed using the display name for your tool. You can also set the global log level, and that will apply to all extensions and the editor.
+### Testing
 
-If you need logs that involve messages between the Language Client and Language Server, you can set `"mytool.server.trace": "verbose"`, to get the messaging logs. These logs are also available `Output` > `mytool` panel.
+```bash
+# Run all tests
+nox --session tests
 
-## Adding new Settings or Commands
+# Run linting
+nox --session lint
+```
 
-You can add new settings by adding details for the settings in `package.json` file. To pass this configuration to your python tool server (i.e, `lsp_server.py`) update the `settings.ts` as need. There are examples of different types of settings in that file that you can base your new settings on.
+Test files are located in `src/test/python_tests/`. See `test_server.py` for the test structure.
 
-You can follow how `restart` command is implemented in `package.json` and `extension.ts` for how to add commands. You can also contribute commands from Python via the Language Server Protocol.
+### Pre-commit
 
-## Testing
+Optional pre-commit hooks run lint and format checks on staged files before each commit:
 
-See `src/test/python_tests/test_server.py` for starting point. See, other referred projects here for testing various aspects of running the tool over LSP.
+```bash
+pip install pre-commit
+pre-commit install
+```
 
-If you have installed the test requirements you should be able to see the tests in the test explorer.
+Activate the project virtual environment before committing so Python hooks (e.g. pylint) can run, or install pre-commit in the same environment as the Python tools.
 
-You can also run all tests using `nox --session tests` command.
+To run hooks on all files once (e.g. to align existing code with the config):
 
-## Linting
+```bash
+pre-commit run --all-files
+```
 
-Run `nox --session lint` to run linting on both Python and TypeScript code. Please update the nox file if you want to use a different linter and formatter.
+### Logging
+
+Logs are available in the `Output` panel under `Litestar`. Control the log level via `Developer: Set Log Level...` in the Command Palette.
+
+For LSP message tracing, set `"litestar.server.trace": "verbose"` in your VS Code settings.
 
 ## Packaging and Publishing
 
-1. Update various fields in `package.json`. At minimum, check the following fields and update them accordingly. See [extension manifest reference](https://code.visualstudio.com/api/references/extension-manifest) to add more fields:
-    - `"publisher"`: Update this to your publisher id from <https://marketplace.visualstudio.com/>.
-    - `"version"`: See <https://semver.org/> for details of requirements and limitations for this field.
-    - `"license"`: Update license as per your project. Defaults to `MIT`.
-    - `"keywords"`: Update keywords for your project, these will be used when searching in the VS Code marketplace.
-    - `"categories"`: Update categories for your project, makes it easier to filter in the VS Code marketplace.
-    - `"homepage"`, `"repository"`, and `"bugs"` : Update URLs for these fields to point to your project.
-    - **Optional** Add `"icon"` field with relative path to a image file to use as icon for this project.
-1. Make sure to check the following markdown files:
-    - **REQUIRED** First time only: `CODE_OF_CONDUCT.md`, `LICENSE`, `SUPPORT.md`, `SECURITY.md`
-    - Every Release: `CHANGELOG.md`
-1. Build package using `nox --session build_package`.
-1. Take the generated `.vsix` file and upload it to your extension management page <https://marketplace.visualstudio.com/manage>.
+```bash
+nox --session build_package
+```
 
-To do this from the command line see here <https://code.visualstudio.com/api/working-with-extensions/publishing-extension>
+Upload the generated `.vsix` to the [VS Code Marketplace](https://marketplace.visualstudio.com/manage), or publish via CLI:
 
-## Upgrading Dependencies
+```bash
+npx vsce publish
+```
 
-Dependabot yml is provided to make it easy to setup upgrading dependencies in this extension. Be sure to add the labels used in the dependabot to your repo.
+See the [publishing guide](https://code.visualstudio.com/api/working-with-extensions/publishing-extension) for details.
 
-To manually upgrade your local project:
+## Contributing
 
-1. Create a new branch
-1. Run `npm update` to update node modules.
-1. Run `nox --session setup` to upgrade python packages.
+Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
-## Troubleshooting
+## License
 
-### Changing path or name of `lsp_server.py` something else
+[MIT](LICENSE)
 
-If you want to change the name of `lsp_server.py` to something else, you can. Be sure to update `constants.ts` and `src/test/python_tests/lsp_test_client/session.py`.
+## Acknowledgements
 
-Also make sure that the inserted paths in `lsp_server.py` are pointing to the right folders to pick up the dependent packages.
-
-### Module not found errors
-
-This can occurs if `bundled/libs` is empty. That is the folder where we put your tool and other dependencies. Be sure to follow the build steps need for creating and bundling the required libs.
-
-Common one is [_pygls_][pygls] module not found.
-
-# TODO: The maintainer of this repo has not yet edited this file
-
-**Repo Owner** Make sure you update this. As a repository owner you will need to update this file with specific instructions for your extension.
-
-[pygls]: https://github.com/openlawlibrary/pygls
+- [Litestar](https://litestar.dev/) — the framework this extension supports
+- [pygls](https://github.com/openlawlibrary/pygls) — Python language server library
+- [VS Code Python Tools Extension Template](https://github.com/microsoft/vscode-python-tools-extension-template) — the foundation this extension is built on

@@ -1,22 +1,22 @@
 {
-    "name": "<pytool-module>",
-    "displayName": "<pytool-display-name>",
-    "description": "Linting support for python files using `<pytool-module>`.",
-    "version": "2022.0.0-dev",
+    "name": "litestar",
+    "displayName": "Litestar",
+    "description": "Litestar framework support for VS Code — route exploration, diagnostics, CodeLens, and more.",
+    "version": "0.1.0",
     "preview": true,
     "serverInfo": {
-        "name": "<pytool-display-name>",
-        "module": "<pytool-module>"
+        "name": "Litestar",
+        "module": "litestar"
     },
-    "publisher": "<my-publisher>",
+    "publisher": "",
     "license": "MIT",
-    "homepage": "https://github.com/<my-github>/<my-extension-project>",
+    "homepage": "",
     "repository": {
         "type": "git",
-        "url": "https://github.com/<my-github>/<my-extension-project>.git"
+        "url": ""
     },
     "bugs": {
-        "url": "https://github.com/<my-github>/<my-extension-project>/issues"
+        "url": ""
     },
     "galleryBanner": {
         "color": "#1e415e",
@@ -24,15 +24,16 @@
     },
     "keywords": [
         "python",
-        "<pytool-module>"
+        "litestar",
+        "asgi",
+        "web-framework"
     ],
     "engines": {
         "vscode": "^1.78.0"
     },
     "categories": [
         "Programming Languages",
-        "Linters",
-        "Formatters"
+        "Other"
     ],
     "extensionDependencies": [
         "ms-python.python"
@@ -40,7 +41,7 @@
     "capabilities": {
         "virtualWorkspaces": {
             "supported": false,
-            "description": "Virtual Workspaces are not supported with <pytool-display-name>."
+            "description": "Virtual Workspaces are not supported with Litestar."
         }
     },
     "activationEvents": [
@@ -59,59 +60,59 @@
         "lint": "eslint src --ext ts",
         "format-check": "prettier --check 'src/**/*.ts' 'build/**/*.yml' '.github/**/*.yml'",
         "test": "node ./out/test/runTest.js",
-        "vsce-package": "vsce package -o <pytool-module>.vsix"
+        "vsce-package": "vsce package -o litestar.vsix"
     },
     "contributes": {
         "configuration": {
             "properties": {
-                "<pytool-module>.cwd": {
+                "litestar.cwd": {
                     "default": "${workspaceFolder}",
-                    "description": "Sets the working directory for <pytool-module>. Supported variables: `${workspaceFolder}` (workspace root) and `${fileDirname}` (directory of the current file).",
+                    "description": "Sets the working directory for the Litestar language server.",
                     "scope": "resource",
                     "type": "string"
                 },
-                "<pytool-module>.args": {
+                "litestar.args": {
                     "default": [],
-                    "description": "Arguments passed in. Each argument is a separate item in the array.",
+                    "description": "Additional arguments passed to the Litestar language server.",
                     "items": {
                         "type": "string"
                     },
                     "scope": "resource",
                     "type": "array"
                 },
-                "<pytool-module>.path": {
+                "litestar.path": {
                     "default": [],
-                    "description": "When set to a path to <pytool-module> binary, extension will use that. NOTE: Using this option may slowdown server response time.",
+                    "description": "Path to a custom Litestar tool binary.",
                     "scope": "resource",
                     "items": {
                         "type": "string"
                     },
                     "type": "array"
                 },
-                "<pytool-module>.importStrategy": {
+                "litestar.importStrategy": {
                     "default": "useBundled",
-                    "description": "Defines where `<pytool-module>` is imported from. This setting may be ignored if `<pytool-module>.path` is set.",
+                    "description": "Defines where bundled libraries are imported from.",
                     "enum": [
                         "useBundled",
                         "fromEnvironment"
                     ],
                     "enumDescriptions": [
-                        "Always use the bundled version of `<pytool-module>`.",
-                        "Use `<pytool-module>` from environment, fallback to bundled version only if `<pytool-module>` not available in the environment."
+                        "Always use the bundled version of libraries.",
+                        "Use libraries from the environment, falling back to bundled versions."
                     ],
                     "scope": "window",
                     "type": "string"
                 },
-                "<pytool-module>.interpreter": {
+                "litestar.interpreter": {
                     "default": [],
-                    "description": "When set to a path to python executable, extension will use that to launch the server and any subprocess.",
+                    "description": "Path to the Python interpreter to use for the language server.",
                     "scope": "resource",
                     "items": {
                         "type": "string"
                     },
                     "type": "array"
                 },
-                "<pytool-module>.showNotifications": {
+                "litestar.showNotifications": {
                     "default": "off",
                     "description": "Controls when notifications are shown by this extension.",
                     "enum": [
@@ -124,18 +125,84 @@
                         "All notifications are turned off, any errors or warning are still available in the logs.",
                         "Notifications are shown only in the case of an error.",
                         "Notifications are shown for errors and warnings.",
-                        "Notifications are show for anything that the server chooses to show."
+                        "Notifications are shown for anything that the server chooses to show."
                     ],
                     "scope": "machine",
                     "type": "string"
+                },
+                "litestar.entryPoint": {
+                    "default": "",
+                    "description": "Entry point for the Litestar app in module notation (e.g., my_app.main:app). Auto-detected if empty.",
+                    "scope": "resource",
+                    "type": "string"
+                },
+                "litestar.diagnostics.enabled": {
+                    "default": true,
+                    "description": "Enable Litestar-specific diagnostics.",
+                    "scope": "resource",
+                    "type": "boolean"
+                },
+                "litestar.codeLens.enabled": {
+                    "default": true,
+                    "description": "Show CodeLens links above test client calls.",
+                    "scope": "resource",
+                    "type": "boolean"
                 }
             }
         },
         "commands": [
             {
                 "title": "Restart Server",
-                "category": "<pytool-display-name>",
-                "command": "<pytool-module>.restart"
+                "category": "Litestar",
+                "command": "litestar.restart"
+            },
+            {
+                "title": "Show Routes",
+                "category": "Litestar",
+                "command": "litestar.showRoutes"
+            },
+            {
+                "title": "Search Routes",
+                "category": "Litestar",
+                "command": "litestar.searchRoutes"
+            },
+            {
+                "title": "Refresh Routes",
+                "category": "Litestar",
+                "command": "litestar.refreshRoutes",
+                "icon": "$(refresh)"
+            }
+        ],
+        "viewsContainers": {
+            "activitybar": [
+                {
+                    "id": "litestar",
+                    "title": "Litestar",
+                    "icon": "resources/litestar.svg"
+                }
+            ]
+        },
+        "views": {
+            "litestar": [
+                {
+                    "id": "litestarRoutes",
+                    "name": "Routes"
+                }
+            ]
+        },
+        "menus": {
+            "view/title": [
+                {
+                    "command": "litestar.refreshRoutes",
+                    "when": "view == litestarRoutes",
+                    "group": "navigation"
+                }
+            ]
+        },
+        "snippets": [
+            {
+                "language": "python",
+                "path": "./snippets/litestar.code-snippets"
             }
         ]
     },
