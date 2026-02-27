@@ -110,6 +110,50 @@ app = Litestar(
     assert app.guards == ["auth_guard"]
 
 
+def test_parse_factory_litestar():
+    """Factory pattern: def create_app() -> Litestar: return Litestar(...) is detected as an app."""
+    source = """
+from litestar import Litestar, get
+
+@get("/health")
+async def health_check() -> dict:
+    return {"ok": True}
+
+
+def create_app() -> Litestar:
+    return Litestar(route_handlers=[health_check])
+"""
+    result = parse_file(source, "file:///test.py")
+    assert len(result.apps) == 1
+    app = result.apps[0]
+    assert app.variable_name == "create_app"
+    assert app.route_handler_names == ["health_check"]
+
+
+def test_parse_factory_litestar_with_plugins():
+    """Factory app with plugins= is parsed; plugin_names and route_handlers are extracted."""
+    source = """
+from litestar import Litestar, get
+
+@get("/ping")
+async def ping() -> dict:
+    return {"pong": True}
+
+
+def create_app() -> Litestar:
+    return Litestar(
+        route_handlers=[ping],
+        plugins=[SomePlugin()],
+    )
+"""
+    result = parse_file(source, "file:///test.py")
+    assert len(result.apps) == 1
+    app = result.apps[0]
+    assert app.variable_name == "create_app"
+    assert app.route_handler_names == ["ping"]
+    assert app.plugin_names == ["SomePlugin"]
+
+
 def test_parse_missing_return_type():
     source = """
 from litestar import get

@@ -339,6 +339,14 @@ def get_routes(params: Any = None) -> list[dict]:
     return ws_index.route_tree_to_dict(tree)
 
 
+@LSP_SERVER.feature("litestar/removeFile")
+def remove_file(params: dict) -> None:
+    """Custom LSP method: remove a file from the workspace index (e.g. after delete/rename)."""
+    uri = params.get("uri")
+    if isinstance(uri, str):
+        INDEX.remove_file(uri)
+
+
 @LSP_SERVER.feature("litestar/dependencies")
 def get_dependencies(params: dict) -> list[dict]:
     """Custom LSP method: return the dependency chain for a handler."""

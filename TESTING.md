@@ -291,17 +291,63 @@ app = Litestar(route_handlers=[router])
 
 ---
 
-## Test 10: Edge Cases
+## Test 10: Factory Litestar (create_app pattern)
+
+Use this when the app is created by a function that returns `Litestar(...)` instead of `app = Litestar(...)`.
+
+### Setup
+
+In the Extension Development Host, create or replace `app.py` with:
+
+```python
+from litestar import get, Router, Litestar
+
+
+@get("/health")
+async def health_check() -> dict:
+    return {"ok": True}
+
+
+api_router = Router(path="/api", route_handlers=[health_check])
+
+
+def create_app() -> Litestar:
+    return Litestar(route_handlers=[api_router])
+```
+
+### Expected
+
+- In the **Litestar: Routes** panel, the tree shows a single root **`create_app`** (the function name), not a flat list.
+- Under `create_app` you see **`api_router [/api]`** and under that **`GET /api/health`**.
+- **Search Routes** lists `GET /api/health` and opening it goes to the `health_check` handler.
+- No duplicate top-level handlers; the app-based tree is used (not the “no app found” fallback).
+
+### Optional: factory with plugins
+
+```python
+def create_app() -> Litestar:
+    return Litestar(
+        route_handlers=[api_router],
+        plugins=[ApplicationCore()],
+    )
+```
+
+**Expected**: Tree shows `create_app` > `ApplicationCore` (and any nested plugins/routes), plus `api_router` and its routes.
+
+---
+
+## Test 11: Edge Cases
 
 1. **Empty file** — open a blank `.py` file. No errors, no crashes.
 2. **Syntax error** — add `def broken(:` to a file. No crashes, diagnostics clear gracefully.
 3. **No Litestar imports** — open a regular Python file. No diagnostics, no tree entries.
 4. **Multiple apps** — define two `Litestar(...)` instances. Both appear as separate roots in the tree.
 5. **Large workspace** — open a project with many `.py` files. Check the Output panel ("Litestar") for `Found N route handlers in workspace` on startup.
+6. **Factory app** — use Test 10 (Factory Litestar) and confirm the tree shows `create_app` with correct children.
 
 ---
 
-## Test 11: Server Logs
+## Test 12: Server Logs
 
 Open the Output panel (`Cmd+Shift+U`) and select "Litestar" from the dropdown.
 

@@ -28,6 +28,7 @@ const KIND_ICONS: Record<string, vscode.ThemeIcon> = {
     app: new vscode.ThemeIcon('server'),
     router: new vscode.ThemeIcon('git-merge'),
     controller: new vscode.ThemeIcon('symbol-class'),
+    plugin: new vscode.ThemeIcon('extensions'),
     dependenciesGroup: new vscode.ThemeIcon('symbol-namespace'),
     guardsGroup: new vscode.ThemeIcon('shield'),
     dependency: new vscode.ThemeIcon('symbol-variable'),
