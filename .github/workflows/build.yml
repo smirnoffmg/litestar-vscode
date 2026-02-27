@@ -47,5 +47,32 @@ jobs:
             - name: Upload VSIX artifact
               uses: actions/upload-artifact@v4
               with:
-                  name: litestar-vsix-${{ github.ref == 'refs/heads/develop' && format('develop-{0}', env.SHORT_SHA) || 'release' }}
+                  name: litestar-vsix-${{ github.ref == 'refs/heads/develop' && 'develop' || 'release' }}
                   path: litestar.vsix
+
+    release-develop:
+        name: Publish develop to Releases
+        needs: [build]
+        if: github.ref == 'refs/heads/develop' && github.event_name == 'push'
+        runs-on: ubuntu-latest
+        permissions:
+            contents: write
+        steps:
+            - name: Get short SHA
+              run: echo "SHORT_SHA=${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+
+            - name: Download VSIX artifact
+              uses: actions/download-artifact@v4
+              with:
+                  name: litestar-vsix-develop
+
+            - name: Create Release and upload VSIX
+              uses: softprops/action-gh-release@v2
+              with:
+                  tag_name: develop-${{ env.SHORT_SHA }}
+                  name: Develop (${{ env.SHORT_SHA }})
+                  files: litestar.vsix
+                  prerelease: true
+                  generate_release_notes: true
+              env:
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
