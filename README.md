@@ -2,7 +2,7 @@
 
 A Visual Studio Code extension for [Litestar](https://litestar.dev/) framework development. Built on the Language Server Protocol with a Python backend for accurate static analysis.
 
-[![Visual Studio Marketplace](https://img.shields.io/visual-studio-marketplace/v/litestar.litestar-vscode?label=VS%20Marketplace)](https://marketplace.visualstudio.com/items?itemName=litestar.litestar-vscode)
+[![Visual Studio Marketplace](https://img.shields.io/visual-studio-marketplace/v/smirnoffmg.litestar?label=VS%20Marketplace)](https://marketplace.visualstudio.com/items?itemName=smirnoffmg.litestar)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ## Features

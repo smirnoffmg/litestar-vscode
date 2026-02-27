@@ -8,16 +8,17 @@
         "name": "Litestar",
         "module": "litestar"
     },
-    "publisher": "",
+    "publisher": "smirnoffmg",
     "license": "MIT",
-    "homepage": "",
+    "homepage": "https://github.com/smirnoffmg/litestar-vscode#readme",
     "repository": {
         "type": "git",
-        "url": ""
+        "url": "https://github.com/smirnoffmg/litestar-vscode.git"
     },
     "bugs": {
-        "url": ""
+        "url": "https://github.com/smirnoffmg/litestar-vscode/issues"
     },
+    "icon": "resources/icon.png",
     "galleryBanner": {
         "color": "#1e415e",
         "theme": "dark"

@@ -42,8 +42,9 @@ jobs:
             - name: Package VSIX
               run: |
                   BASE_URL="${{ github.server_url }}/${{ github.repository }}"
+                  BASE_IMAGES_URL="${BASE_URL}/raw/${{ github.ref_name }}"
                   npx @vscode/vsce package -o litestar.vsix --no-dependencies \
-                      --baseContentUrl "${BASE_URL}" --baseImagesUrl "${BASE_URL}"
+                      --baseContentUrl "${BASE_URL}" --baseImagesUrl "${BASE_IMAGES_URL}"
 
             - name: Rename VSIX with tag
               run: mv litestar.vsix "litestar-${{ github.ref_name }}.vsix"
