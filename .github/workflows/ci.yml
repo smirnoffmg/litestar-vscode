@@ -1,0 +1,72 @@
+name: CI
+
+on:
+    push:
+        branches: [main, develop]
+    pull_request:
+        branches: [main, develop]
+
+jobs:
+    lint:
+        name: Lint
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            - name: Setup Node.js
+              uses: actions/setup-node@v4
+              with:
+                  node-version: '20'
+                  cache: 'npm'
+
+            - name: Setup Python
+              uses: actions/setup-python@v5
+              with:
+                  python-version: '3.12'
+
+            - name: Install Node dependencies
+              run: npm ci
+
+            - name: ESLint
+              run: npm run lint
+
+            - name: Prettier format check
+              run: npm run format-check
+
+            - name: Install nox
+              run: pip install nox
+
+            - name: Python lint (ruff, mypy)
+              run: nox -s lint
+
+    test:
+        name: Test
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            - name: Setup Node.js
+              uses: actions/setup-node@v4
+              with:
+                  node-version: '20'
+                  cache: 'npm'
+
+            - name: Setup Python
+              uses: actions/setup-python@v5
+              with:
+                  python-version: '3.12'
+
+            - name: Install Node dependencies
+              run: npm ci
+
+            - name: Install Python bundle (lsprotocol, pygls, etc.)
+              run: |
+                  pip install -t ./bundled/libs --no-cache-dir --implementation py --no-deps --upgrade -r ./requirements.txt
+
+            - name: Install nox
+              run: pip install nox
+
+            - name: Run Python tests
+              run: nox -s tests
