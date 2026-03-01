@@ -29,8 +29,12 @@ jobs:
             - name: Install Node dependencies
               run: npm ci
 
-            - name: Install pre-commit
-              run: pip install pre-commit
+            - name: Install pre-commit and nox
+              run: pip install pre-commit nox
+
+            - name: Install Python bundle
+              run: |
+                  pip install -t ./bundled/libs --no-cache-dir --implementation py --no-deps --upgrade -r ./requirements.txt
 
             - name: Run pre-commit (all files)
               run: pre-commit run --all-files
