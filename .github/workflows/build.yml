@@ -55,7 +55,7 @@ jobs:
                       --baseContentUrl "${BASE_URL}" --baseImagesUrl "${BASE_IMAGES_URL}"
 
             - name: Upload VSIX artifact
-              uses: actions/upload-artifact@v4
+              uses: actions/upload-artifact@v7
               with:
                   name: litestar-vsix-${{ github.ref == 'refs/heads/develop' && 'develop' || 'release' }}
                   path: litestar.vsix
