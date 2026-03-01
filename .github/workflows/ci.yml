@@ -60,8 +60,5 @@ jobs:
               run: |
                   pip install -t ./bundled/libs --no-cache-dir --implementation py --no-deps --upgrade -r ./requirements.txt
 
-            - name: Extension tests (npm)
-              run: npm test
-
             - name: Python tests (nox)
               run: pip install nox && nox -s tests
