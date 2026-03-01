@@ -1,0 +1,68 @@
+# CI: lint (pre-commit) + tests. Kept in sync with .pre-commit-config.yaml.
+name: CI
+
+on:
+    push:
+        branches: [main]
+    pull_request:
+        branches: [main]
+
+jobs:
+    lint:
+        name: Lint (pre-commit)
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            - name: Set up Node.js
+              uses: actions/setup-node@v4
+              with:
+                  node-version: '20'
+                  cache: 'npm'
+
+            - name: Set up Python
+              uses: actions/setup-python@v5
+              with:
+                  python-version: '3.12'
+
+            - name: Install Node dependencies
+              run: npm ci
+
+            - name: Install pre-commit and nox
+              run: pip install pre-commit nox
+
+            - name: Install Python bundle
+              run: |
+                  pip install -t ./bundled/libs --no-cache-dir --implementation py --no-deps --upgrade -r ./requirements.txt
+
+            - name: Run pre-commit (all files)
+              run: pre-commit run --all-files
+
+    test:
+        name: Tests
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            - name: Set up Node.js
+              uses: actions/setup-node@v4
+              with:
+                  node-version: '20'
+                  cache: 'npm'
+
+            - name: Set up Python
+              uses: actions/setup-python@v5
+              with:
+                  python-version: '3.12'
+
+            - name: Install Node dependencies
+              run: npm ci
+
+            - name: Install Python bundle
+              run: |
+                  pip install -t ./bundled/libs --no-cache-dir --implementation py --no-deps --upgrade -r ./requirements.txt
+
+            - name: Python tests (nox)
+              run: pip install nox && nox -s tests

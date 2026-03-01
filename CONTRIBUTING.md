@@ -30,7 +30,7 @@ Without the bundle step, installing the VSIX will fail with `ModuleNotFoundError
 
 1. Open an issue or comment on an existing one to discuss the change.
 2. Fork the repo, create a branch, and make your changes.
-3. Ensure tests and lint pass (`npm run pretest`, pre-commit).
+3. Ensure tests and lint pass (`pre-commit run --all-files`).
 4. Open a pull request with a clear description and reference any related issues.
 
 ## Code of conduct
