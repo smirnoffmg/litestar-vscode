@@ -2,8 +2,8 @@
     "name": "litestar",
     "displayName": "Litestar",
     "description": "Litestar framework support for VS Code — route exploration, diagnostics, CodeLens, and more.",
-    "version": "0.2.0",
-    "preview": true,
+    "version": "0.2.1",
+    "preview": false,
     "serverInfo": {
         "name": "Litestar",
         "module": "litestar"
@@ -27,14 +27,31 @@
         "python",
         "litestar",
         "asgi",
-        "web-framework"
+        "web-framework",
+        "api",
+        "rest",
+        "routes",
+        "codelens",
+        "diagnostics",
+        "linter",
+        "snippets",
+        "dependency-injection",
+        "lsp",
+        "language-server",
+        "starlite",
+        "controllers",
+        "guards",
+        "openapi",
+        "testing",
+        "web"
     ],
     "engines": {
         "vscode": "^1.78.0"
     },
     "categories": [
         "Programming Languages",
-        "Other"
+        "Linters",
+        "Snippets"
     ],
     "extensionDependencies": [
         "ms-python.python"
@@ -200,6 +217,19 @@
             {
                 "language": "python",
                 "path": "./snippets/litestar.code-snippets"
+            }
+        ],
+        "viewsWelcome": [
+            {
+                "view": "litestarRoutes",
+                "contents": "No Litestar app found in this workspace.\n\nMake sure your project contains a Litestar() instance, or set the entry point manually.\n\n[Configure Entry Point](command:workbench.action.openSettings?[\"litestar.entryPoint\"])"
+            }
+        ],
+        "keybindings": [
+            {
+                "command": "litestar.searchRoutes",
+                "key": "ctrl+shift+e",
+                "mac": "cmd+shift+e"
             }
         ]
     },
